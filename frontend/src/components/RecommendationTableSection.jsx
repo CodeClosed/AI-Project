@@ -282,7 +282,7 @@ export default function RecommendationTableSection({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            3. 3-Tier Recommendation Tables & Matchmaker Engine
+            3-Tier Food Recommendations & Matchmaker Engine
           </h2>
           <p className="text-xs text-slate-500">
             Evaluates all menu items against your active health matrix and classifies them into Good, Medium, Bad, and Unified tables.

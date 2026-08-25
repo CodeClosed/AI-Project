@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Image as ImageIcon, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, Trash2, Loader2, X } from 'lucide-react';
 import { uploadMenuImage } from '../api';
 
 export default function MenuUploadSection({
@@ -63,6 +63,16 @@ export default function MenuUploadSection({
     }
   };
 
+  const handleClearImage = (e) => {
+    e.stopPropagation();
+    setImagePreview(null);
+    setDishes([]);
+    setOcrError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleParseManual = () => {
     const lines = manualText.split('\n');
     const parsed = [];
@@ -93,7 +103,7 @@ export default function MenuUploadSection({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            2. Restaurant Menu Image Upload & Extracted Items Table
+            Restaurant Menu Image Upload & Extracted Items Table
             {dishes.length > 0 && (
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-black tabular-nums">
                 {dishes.length} items detected
@@ -109,7 +119,7 @@ export default function MenuUploadSection({
         <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
           <button
             onClick={() => setActiveTab('upload')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] ${
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
               activeTab === 'upload' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
@@ -117,7 +127,7 @@ export default function MenuUploadSection({
           </button>
           <button
             onClick={() => setActiveTab('manual')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] ${
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
               activeTab === 'manual' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
@@ -137,7 +147,7 @@ export default function MenuUploadSection({
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center min-h-[300px] relative overflow-hidden ${
+              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center min-h-[300px] relative overflow-hidden group ${
                 dragActive
                   ? 'border-emerald-500 bg-emerald-50/60 scale-[1.01]'
                   : 'border-slate-300 bg-slate-50/70 hover:border-emerald-500/60 hover:bg-slate-50'
@@ -160,15 +170,34 @@ export default function MenuUploadSection({
               )}
 
               {imagePreview ? (
-                <div className="w-full flex flex-col items-center">
+                <div className="relative w-full flex flex-col items-center">
+                  {/* Dedicated Close / Remove File Button */}
+                  <button
+                    type="button"
+                    onClick={handleClearImage}
+                    title="Remove menu image"
+                    className="absolute -top-2 -right-2 z-30 p-1.5 rounded-full bg-slate-900/80 hover:bg-rose-600 text-white shadow-md transition-all active:scale-[0.96] cursor-pointer"
+                  >
+                    <X className="w-4 h-4 stroke-[2.5]" />
+                  </button>
+
                   <img
                     src={imagePreview}
                     alt="Uploaded Menu"
                     className="max-h-56 rounded-xl object-contain shadow-sm border border-slate-200 ring-1 ring-slate-900/5"
                   />
-                  <span className="mt-3 text-xs text-slate-600 font-semibold hover:text-emerald-600">
-                    Click to replace with another image
-                  </span>
+                  <div className="mt-3 flex items-center gap-3">
+                    <span className="text-xs text-slate-600 font-semibold group-hover:text-emerald-600">
+                      Click to replace image
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleClearImage}
+                      className="text-xs text-rose-600 hover:text-rose-700 font-bold underline cursor-pointer"
+                    >
+                      Clear File
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col items-center">
@@ -239,7 +268,7 @@ export default function MenuUploadSection({
                         <td className="py-2.5 px-3 text-center">
                           <button
                             onClick={() => removeDish(idx)}
-                            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-[0.96]"
+                            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-[0.96] cursor-pointer"
                             title="Remove dish"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
