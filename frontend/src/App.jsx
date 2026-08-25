@@ -155,6 +155,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
         {/* Section 1: Menu Upload (Left Image / Right Extracted Items Table) */}
         <MenuUploadSection
+          profile={profile}
           dishes={dishes}
           setDishes={setDishes}
           ocrLoading={ocrLoading}

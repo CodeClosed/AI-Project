@@ -94,9 +94,9 @@ def health_check():
 
 
 @app.post("/api/ocr/extract")
-async def extract_menu_from_image(file: UploadFile = File(...)):
+async def extract_menu_from_image(file: UploadFile = File(...), api_key: Optional[str] = Form(None)):
     """
-    Accepts an uploaded menu image, processes it via Preprocessor & EasyOCR / Gemini Vision,
+    Accepts an uploaded menu image, processes it via Gemini Vision / Deep OCR,
     and returns a structured list of cleaned dishes.
     """
     try:
@@ -109,8 +109,9 @@ async def extract_menu_from_image(file: UploadFile = File(...)):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
 
-        # Run OCR Pipeline
-        recognized_menu: RecognizedMenu = ocr_pipeline.process_image(image)
+        # Run OCR Pipeline (Prioritizes Gemini Vision AI when API key is present)
+        pipeline = MenuRecognitionPipeline(api_key=api_key) if api_key else ocr_pipeline
+        recognized_menu: RecognizedMenu = pipeline.process_image(image)
         flat_items = recognized_menu.to_flat_items()
 
         dishes = []

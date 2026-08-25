@@ -4,9 +4,12 @@
 
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
-export async function uploadMenuImage(imageFile) {
+export async function uploadMenuImage(imageFile, apiKey = null) {
   const formData = new FormData();
   formData.append('file', imageFile);
+  if (apiKey) {
+    formData.append('api_key', apiKey);
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/ocr/extract`, {
     method: 'POST',

@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Image as ImageIcon, Trash2, Loader2, X, Plus } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, Trash2, Loader2, X, Plus, Sparkles } from 'lucide-react';
 import { uploadMenuImage } from '../api';
 
 export default function MenuUploadSection({
+  profile,
   dishes,
   setDishes,
   ocrLoading,
@@ -51,7 +52,8 @@ export default function MenuUploadSection({
     setOcrLoading(true);
 
     try {
-      const data = await uploadMenuImage(file);
+      // Pass Gemini API key from user profile (or server env)
+      const data = await uploadMenuImage(file, profile?.api_key);
       if (data.dishes && data.dishes.length > 0) {
         setDishes(data.dishes);
       } else {
@@ -119,8 +121,11 @@ export default function MenuUploadSection({
               </span>
             )}
           </h2>
-          <p className="text-xs text-slate-500">
-            Upload your menu image on the left. The OCR engine will process it and populate the extracted items table on the right.
+          <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+            <span>Upload your menu image on the left.</span>
+            <span className="text-emerald-700 font-semibold flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-emerald-600" /> Powered by Gemini Vision
+            </span>
           </p>
         </div>
 
@@ -171,10 +176,13 @@ export default function MenuUploadSection({
               />
 
               {ocrLoading && (
-                <div className="absolute inset-0 bg-white/90 backdrop-blur-xs z-20 flex flex-col items-center justify-center p-4">
-                  <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
-                  <span className="text-sm font-bold text-slate-900">Running Deep OCR Pipeline...</span>
-                  <span className="text-xs text-slate-500 mt-1">Enhancing, deskewing & stripping noise</span>
+                <div className="absolute inset-0 bg-white/95 backdrop-blur-xs z-20 flex flex-col items-center justify-center p-4">
+                  <div className="relative mb-3">
+                    <Loader2 className="w-9 h-9 text-emerald-600 animate-spin" />
+                    <Sparkles className="w-4 h-4 text-emerald-500 absolute -top-1 -right-1" />
+                  </div>
+                  <span className="text-sm font-bold text-slate-900">Gemini Vision AI Analyzing Menu...</span>
+                  <span className="text-xs text-slate-500 mt-1">Zero-shot dish extraction & typo correction</span>
                 </div>
               )}
 
@@ -214,9 +222,12 @@ export default function MenuUploadSection({
                     <UploadCloud className="w-7 h-7" />
                   </div>
                   <h3 className="text-sm font-bold text-slate-900 mb-1">Click or drag & drop menu photo</h3>
-                  <p className="text-xs text-slate-500 mb-3">PNG, JPG, or JPEG image files</p>
-                  <span className="px-4 py-1.5 rounded-xl bg-white text-xs font-bold text-emerald-700 border border-slate-300 shadow-xs">
+                  <p className="text-xs text-slate-500 mb-2">PNG, JPG, or JPEG image files</p>
+                  <span className="px-4 py-1.5 rounded-xl bg-white text-xs font-bold text-emerald-700 border border-slate-300 shadow-xs mb-2">
                     Browse File
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-emerald-500" /> Multi-modal Gemini Vision Engine
                   </span>
                 </div>
               )}
