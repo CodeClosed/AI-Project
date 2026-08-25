@@ -79,6 +79,60 @@ class UserNutritionalMatrix:
         """Serializes the entire matrix to a Python dictionary."""
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "UserNutritionalMatrix":
+        """Deserializes a dictionary into a UserNutritionalMatrix object."""
+        m_data = data.get("metabolic_targets", {})
+        w_data = data.get("clinical_risk_weights", {})
+        g_data = data.get("nutritional_guardrails", {})
+
+        metabolic = MetabolicTargets(
+            bmr_kcal=float(m_data.get("bmr_kcal", 1800)),
+            tdee_kcal=float(m_data.get("tdee_kcal", 2200)),
+            target_calories_kcal=float(m_data.get("target_calories_kcal", 2000)),
+            target_protein_g=float(m_data.get("target_protein_g", 120)),
+            target_protein_pct=float(m_data.get("target_protein_pct", 25)),
+            target_carbs_g=float(m_data.get("target_carbs_g", 220)),
+            target_carbs_pct=float(m_data.get("target_carbs_pct", 45)),
+            target_fats_g=float(m_data.get("target_fats_g", 65)),
+            target_fats_pct=float(m_data.get("target_fats_pct", 30)),
+            protein_g_per_kg=float(m_data.get("protein_g_per_kg", 1.4)),
+            target_water_liters=float(m_data.get("target_water_liters", 2.5)),
+            caloric_adjustment_ratio=float(m_data.get("caloric_adjustment_ratio", 0.0)),
+            strategy_summary=str(m_data.get("strategy_summary", "")),
+        )
+
+        weights = ClinicalRiskWeights(
+            glycemic_sensitivity=float(w_data.get("glycemic_sensitivity", 0.5)),
+            cardiovascular_risk_weight=float(w_data.get("cardiovascular_risk_weight", 0.5)),
+            lipid_optimization_weight=float(w_data.get("lipid_optimization_weight", 0.5)),
+            inflammation_index_weight=float(w_data.get("inflammation_index_weight", 0.5)),
+            digestive_sensitivity_weight=float(w_data.get("digestive_sensitivity_weight", 0.5)),
+            satiety_demand_weight=float(w_data.get("satiety_demand_weight", 0.5)),
+        )
+
+        guardrails = NutritionalGuardrails(
+            sodium_ceiling_mg=int(g_data.get("sodium_ceiling_mg", 2000)),
+            saturated_fat_max_pct=float(g_data.get("saturated_fat_max_pct", 0.08)),
+            added_sugar_max_g=float(g_data.get("added_sugar_max_g", 25)),
+            dietary_fiber_min_g=float(g_data.get("dietary_fiber_min_g", 30)),
+            potassium_target_mg=int(g_data.get("potassium_target_mg", 3500)),
+            omega3_min_g=float(g_data.get("omega3_min_g", 1.6)),
+            digestive_triggers_to_avoid=list(g_data.get("digestive_triggers_to_avoid", [])),
+            key_micronutrient_priorities=list(g_data.get("key_micronutrient_priorities", [])),
+        )
+
+        return cls(
+            user_id=data.get("user_id"),
+            user_summary=data.get("user_summary", ""),
+            metabolic_targets=metabolic,
+            clinical_risk_weights=weights,
+            nutritional_guardrails=guardrails,
+            food_group_weights=data.get("food_group_weights", {}),
+            exclusion_mask=data.get("exclusion_mask", []),
+            metadata=data.get("metadata", {}),
+        )
+
     def to_json(self, indent: int = 2) -> str:
         """Serializes the matrix to standard JSON string."""
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
