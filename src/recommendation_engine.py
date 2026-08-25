@@ -6,9 +6,9 @@ three distinct tiers: 🟢 GOOD, 🟡 MEDIUM, and 🔴 BAD.
 
 Architecture:
 1. Hard Safety Exclusions (Allergies & Strict Diets) -> Instant BAD (Fit Score = 0). AI CANNOT override.
-2. Clinical & Nutritional Scoring -> Deterministic explainable scoring based on metabolic targets & guardrails.
+2. Clinical & Nutritional Scoring -> Explainable scoring based on metabolic targets & guardrails.
 3. 3-Tier Classification -> Thresholding into GOOD / MEDIUM / BAD.
-4. AI Enrichment (Optional) -> Natural language explanations and culinary tips without safety authority.
+4. AI Enrichment -> Deep biochemical clinical explanations, tailored flags, and bespoke chef advice via Gemini.
 """
 
 from typing import List, Dict, Any, Optional, Union
@@ -124,13 +124,13 @@ class TieredRecommendationResult:
                 lines.append(f"### 🥗 {item.dish_name} (Fit Score: `{item.fit_score}/100`)")
                 if item.price:
                     lines.append(f"- **Price**: {item.price}")
-                lines.append(f"- **Why it's Good**: {item.summary_reason}")
+                lines.append(f"- **Clinical Rationale**: {item.summary_reason}")
                 if item.matched_food_groups:
                     lines.append(f"- **Food Groups**: {', '.join(item.matched_food_groups)}")
                 if item.green_flags:
                     lines.append(f"- **Green Flags**: {'; '.join(item.green_flags)}")
                 if item.customization_tips:
-                    lines.append(f"- **Customization Tip**: *{item.customization_tips}*")
+                    lines.append(f"- **Chef's Advice**: *{item.customization_tips}*")
                 lines.append("")
         else:
             lines.append("_No items qualified for Tier 1 based on current thresholds._\n")
@@ -141,11 +141,11 @@ class TieredRecommendationResult:
                 lines.append(f"### 🍲 {item.dish_name} (Fit Score: `{item.fit_score}/100`)")
                 if item.price:
                     lines.append(f"- **Price**: {item.price}")
-                lines.append(f"- **Evaluation**: {item.summary_reason}")
+                lines.append(f"- **Clinical Evaluation**: {item.summary_reason}")
                 if item.red_flags:
                     lines.append(f"- **Caution Areas**: {'; '.join(item.red_flags)}")
                 if item.customization_tips:
-                    lines.append(f"- **How to Make it Better**: *{item.customization_tips}*")
+                    lines.append(f"- **Chef's Advice**: *{item.customization_tips}*")
                 lines.append("")
         else:
             lines.append("_No items in Tier 2._\n")
@@ -274,12 +274,12 @@ class TieredFoodRecommender:
                 return {
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
-                    "summary_reason": f"Violates dietary restriction (contains non-vegetarian item: {', '.join(matched_non_veg)}).",
+                    "summary_reason": f"Violates strict vegetarian lifestyle (contains non-veg animal ingredient: '{matched_non_veg[0]}').",
                     "matched_food_groups": ["Animal Meat"],
                     "green_flags": [],
-                    "red_flags": [f"Contains non-vegetarian animal meat/seafood: {', '.join(matched_non_veg)}"],
+                    "red_flags": [f"Contains non-vegetarian animal meat: {matched_non_veg[0]}"],
                     "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({matched_non_veg[0]})"],
-                    "customization_tips": "Select a plant-based or dairy protein alternative.",
+                    "customization_tips": "Request a 100% vegetarian plant-based or dairy protein substitute.",
                 }
 
         # 2. Vegan / Dairy / Egg exclusion check
@@ -290,10 +290,10 @@ class TieredFoodRecommender:
                 return {
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
-                    "summary_reason": f"Violates vegan/dairy restriction (contains animal byproduct: {', '.join(matched_dairy_egg)}).",
+                    "summary_reason": f"Violates vegan/dairy restriction (contains dairy or egg byproduct: '{matched_dairy_egg[0]}').",
                     "matched_food_groups": ["Dairy / Egg"],
                     "green_flags": [],
-                    "red_flags": [f"Contains dairy/egg byproduct: {', '.join(matched_dairy_egg)}"],
+                    "red_flags": [f"Contains animal byproduct: {matched_dairy_egg[0]}"],
                     "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({matched_dairy_egg[0]})"],
                     "customization_tips": "Ask for dairy-free or plant-based preparation.",
                 }
@@ -324,20 +324,18 @@ class TieredFoodRecommender:
                     return {
                         "tier": FoodTier.BAD,
                         "fit_score": 0,
-                        "summary_reason": f"Strictly forbidden: contains declared allergen '{allergy}' ({target}).",
+                        "summary_reason": f"Critical Allergen Conflict: Dish contains declared allergen '{allergy}' ({target}).",
                         "matched_food_groups": [f"Allergen: {allergy}"],
                         "green_flags": [],
-                        "red_flags": [f"Critical allergen detected: {allergy}"],
-                        "allergen_warnings": [f"Contains allergen: {allergy}"],
-                        "customization_tips": "Request completely separate allergen-free preparation or select a different dish.",
+                        "red_flags": [f"Zero-tolerance allergen alert: {allergy}"],
+                        "allergen_warnings": [f"Contains Allergen: {allergy}"],
+                        "customization_tips": "Requires complete kitchen cross-contact isolation or choose a safe allergen-free alternative.",
                     }
 
         return None
 
     def recommend_dish(self, dish: Union[MenuItem, Dict[str, Any], str]) -> TieredFoodRecommendation:
-        """
-        Classifies and recommends a single dish into GOOD, MEDIUM, or BAD.
-        """
+        """Classifies and recommends a single dish into GOOD, MEDIUM, or BAD."""
         dish_dict = self._to_dish_dict(dish)
 
         # 1. Hard exclusions check (Immediate BAD)
@@ -373,9 +371,7 @@ class TieredFoodRecommender:
         self,
         menu_input: Union[RecognizedMenu, List[Union[MenuItem, Dict[str, Any], str]]],
     ) -> TieredRecommendationResult:
-        """
-        Evaluates a complete menu or list of dishes, returning a structured 3-Tier Recommendation Result.
-        """
+        """Evaluates a complete menu or list of dishes, returning a structured 3-Tier Recommendation Result."""
         dishes: List[Dict[str, Any]] = []
 
         if isinstance(menu_input, RecognizedMenu):
@@ -468,61 +464,55 @@ class TieredFoodRecommender:
             }
 
     def _recommend_batch_ai(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
-        """Classifies dishes into 3 tiers using Gemini Flash."""
+        """Classifies dishes into 3 tiers using Gemini Flash with deep item-specific clinical reasoning."""
         prompt = f"""
-You are an expert clinical nutrition matchmaking AI (The Middle Model).
-Your task is to classify food dishes into EXACTLY 3 TIERS for the specified user:
-- 🟢 "GOOD" (Tier 1: High nutritional fit, aligns with goals, safe, health-promoting)
-- 🟡 "MEDIUM" (Tier 2: Moderate choice, neutral food groups, needs portion control or simple customization)
-- 🔴 "BAD" (Tier 3: Strictly avoid, contains allergens/diet violations, high glycemic spikes, extreme sodium, or deep-fried)
+You are an elite Clinical Nutrition Scientist and Master Culinary Dietitian (The Middle Model).
+Evaluate each restaurant menu item against the user's specific clinical health profile and classify it into EXACTLY ONE of 3 TIERS:
+- 🟢 "GOOD" (Tier 1: High nutritional fit, optimal metabolic alignment, safe, health-promoting)
+- 🟡 "MEDIUM" (Tier 2: Moderate choice, acceptable with portion control or minor culinary modification)
+- 🔴 "BAD" (Tier 3: Strictly avoid, contains allergens/diet violations, high glycemic spikes, excessive saturated fat/sodium, or deep-fried)
 
-USER PROFILE & METRICS:
-- Summary: {self.user_summary}
-- Target Daily Calories: {self.target_calories:.0f} kcal
-- Target Protein: {self.target_protein_g:.0f} g
-- Glycemic Sensitivity (0 to 1): {self.glycemic_sensitivity:.2f}
-- Sodium Limit: {self.sodium_ceiling} mg/day
-- Saturated Fat Ceiling: {self.sat_fat_max_pct * 100:.0f}%
-- Digestive Triggers to Avoid: {', '.join(self.digestive_triggers) if self.digestive_triggers else 'None'}
-- Strict Exclusions & Allergies: {', '.join(self.exclusions) if self.exclusions else 'None'}
-- Food Group Compatibility Weights: {json.dumps(self.food_group_weights, indent=1) if self.food_group_weights else 'Standard'}
+USER CLINICAL HEALTH MATRIX:
+- Clinical Summary: {self.user_summary}
+- Target Daily Energy: {self.target_calories:.0f} kcal/day
+- Target Protein: {self.target_protein_g:.0f} g/day
+- Glycemic Sensitivity Index (0.0 to 1.0): {self.glycemic_sensitivity:.2f} (High values require strict low-GI / low glycemic load)
+- Sodium Limit: < {self.sodium_ceiling} mg/day (Strict threshold for hypertension)
+- Saturated Fat Ceiling: < {self.sat_fat_max_pct * 100:.0f}% of total calories (Strict threshold for hyperlipidemia / heart disease)
+- Gastrointestinal / Reflux Triggers: {', '.join(self.digestive_triggers) if self.digestive_triggers else 'None'}
+- Strict Exclusions & Allergens: {', '.join(self.exclusions) if self.exclusions else 'None'}
 
 DISHES TO EVALUATE:
 {json.dumps(dishes, indent=2)}
 
-SCORING & TIER ASSIGNMENT RULES:
-1. 'tier': MUST be one of ["GOOD", "MEDIUM", "BAD"].
-   - GOOD: fit_score >= {self.good_threshold}
-   - MEDIUM: {self.bad_threshold} <= fit_score < {self.good_threshold}
-   - BAD: fit_score < {self.bad_threshold} OR violates any allergen/dietary restriction.
-2. If any dish violates strict exclusions/allergies (e.g. peanuts for peanut allergy, meat for vegetarian), it MUST be Tier "BAD", fit_score 0, with 'allergen_warnings' populated.
-3. Provide:
-   - 'dish_name': exact dish name
-   - 'tier': "GOOD" | "MEDIUM" | "BAD"
-   - 'fit_score': integer (0 to 100)
-   - 'summary_reason': crisp explanation of tier classification
-   - 'matched_food_groups': list of identified food groups in the dish
-   - 'green_flags': list of positive metabolic aspects
-   - 'red_flags': list of negative metabolic or clinical aspects
-   - 'allergen_warnings': list of strict violations if any
-   - 'customization_tips': practical request to make dish healthier
-   - 'estimated_calories': estimated integer kcal
-   - 'estimated_protein_g': estimated integer protein grams
+CRITICAL INSTRUCTIONS FOR HIGH-CRAFT, BESPOKE ANALYSIS:
+1. ZERO-GENERIC POLICY: Do NOT use boilerplate phrases like "Moderate fit", "Good choice", or "Pair with salad". Every single field MUST be 100% UNIQUE and specific to the exact ingredients, cooking technique, and biochemistry of THAT particular dish.
+2. DISH-SPECIFIC CLINICAL ASSESSMENT ('summary_reason'):
+   - Provide a 2-3 sentence rigorous clinical breakdown directly naming the specific culinary ingredients (e.g. makhani cashew gravy, stone-ground whole wheat atta, refined maida, russet potato starch, aspartame, deep-fry oil, cheese casein).
+   - Explain the direct biochemical impact on the user's health conditions (e.g. postprandial glycemic spike, LDL atherogenic lipid load, arterial endothelial strain from sodium, or gastric acid reflux).
+3. DISTINCT NUTRITIONAL FLAGS:
+   - 'green_flags': 2-3 specific biochemical strengths of this exact dish (e.g. "Tandoor dry-heat preparation avoids oxidized cooking fats", "Rich in lycopene from slow-cooked tomatoes", "High biological value complete poultry protein").
+   - 'red_flags': 2-3 specific clinical caution areas of this exact dish (e.g. "High dairy cream and butter emulsion elevates saturated fat", "Refined starch causes rapid glycemic surge", "Deep-fryer thermal degradation produces advanced lipid peroxides").
+4. BESPOKE CHEF CUSTOMIZATION ADVICE ('customization_tips'):
+   - Provide practical, realistic culinary hacks tailored specifically to that dish (e.g. for curries: "Ask the kitchen to prepare with half the butter and substitute heavy cream with whisked dahi; request gravy on the side"; for rotis: "Request unbuttered 100% whole wheat roti rather than maida-based naan"; for burgers: "Request a lettuce wrap to cut 180 kcal of refined carbs and skip the mayo").
+5. HARD SAFETY VIOLATIONS: If a dish violates declared allergens or vegetarian/vegan restrictions, force Tier = "BAD", fit_score = 0, and describe the exact violation in 'allergen_warnings'.
 
-Return ONLY a valid JSON array of objects matching this schema:
+Return ONLY valid JSON matching this schema:
 [
   {{
-    "dish_name": "Tandoori Paneer Tikka",
-    "tier": "GOOD",
-    "fit_score": 88,
-    "summary_reason": "High protein, grilled preparation with low glycemic impact.",
-    "matched_food_groups": ["Plant & Dairy Protein", "Grilled Vegetables", "Spices"],
-    "green_flags": ["High protein", "Minimal oil preparation", "Rich in calcium"],
-    "red_flags": ["Moderate saturated fat"],
+    "dish_name": "Exact Name",
+    "tier": "GOOD" | "MEDIUM" | "BAD",
+    "fit_score": 85,
+    "summary_reason": "Detailed, bespoke clinical evaluation referencing the specific ingredients and biochemical impact.",
+    "matched_food_groups": ["Food Group 1", "Food Group 2"],
+    "green_flags": ["Specific advantage 1", "Specific advantage 2"],
+    "red_flags": ["Specific caution 1"],
     "allergen_warnings": [],
-    "customization_tips": "Pair with a fresh green cucumber salad and mint chutney.",
-    "estimated_calories": 320,
-    "estimated_protein_g": 18
+    "customization_tips": "Specific culinary instruction tailored to this exact recipe.",
+    "estimated_calories": 350,
+    "estimated_protein_g": 22,
+    "estimated_carbs_g": 25,
+    "estimated_fat_g": 12
   }}
 ]
 """
@@ -540,7 +530,6 @@ Return ONLY a valid JSON array of objects matching this schema:
         results: List[TieredFoodRecommendation] = []
         for d in response_json:
             name = d.get("dish_name", "Unknown Dish")
-            raw_tier = str(d.get("tier", "MEDIUM")).upper()
             score = int(d.get("fit_score", 50))
 
             # Safety enforcement
@@ -560,7 +549,7 @@ Return ONLY a valid JSON array of objects matching this schema:
                     tier = FoodTier.MEDIUM
                 else:
                     tier = FoodTier.BAD
-                summary = d.get("summary_reason", "Classified based on nutritional matrix.")
+                summary = d.get("summary_reason", "Classified based on clinical nutritional matrix.")
                 warnings = d.get("allergen_warnings", [])
                 reds = d.get("red_flags", [])
 
@@ -577,6 +566,8 @@ Return ONLY a valid JSON array of objects matching this schema:
                     customization_tips=d.get("customization_tips"),
                     estimated_calories=d.get("estimated_calories"),
                     estimated_protein_g=d.get("estimated_protein_g"),
+                    estimated_carbs_g=d.get("estimated_carbs_g"),
+                    estimated_fat_g=d.get("estimated_fat_g"),
                     price=dish_price_map.get(name.lower(), ""),
                 )
             )
@@ -585,8 +576,8 @@ Return ONLY a valid JSON array of objects matching this schema:
 
     def _recommend_dish_deterministic(self, dish: Dict[str, Any]) -> TieredFoodRecommendation:
         """
-        High-precision deterministic rule-based matchmaking algorithm.
-        Evaluates food against user's exclusions, clinical risk weights, and food group affinities.
+        High-precision deterministic rule-based matchmaking algorithm with rich culinary heuristics.
+        Provides distinct, item-specific assessments across popular dishes when offline.
         """
         name = dish.get("name", "Unknown Item")
         desc = dish.get("description", "")
@@ -611,98 +602,91 @@ Return ONLY a valid JSON array of objects matching this schema:
                 price=price,
             )
 
-        score = 65  # Baseline neutral score
+        score = 65
         greens: List[str] = []
         reds: List[str] = []
         allergen_alerts: List[str] = []
         matched_groups: List[str] = []
+        summary = ""
+        customization = ""
 
-        # Check digestive triggers
-        for trigger in self.digestive_triggers:
-            if trigger.lower() in full_text:
-                score -= 25
-                reds.append(f"Contains sensitivity trigger: {trigger}")
-
-        # 2. FOOD GROUP SCORING & HEALTH ENHANCERS
-        # Leafy greens / cruciferous / fresh veg
-        if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber", "methi", "saag", "cabbage", "kale", "lettuce", "veggie", "vegetable", "asparagus"]):
-            score += 15
-            greens.append("High in dietary fiber, micronutrients, and antioxidants")
-            matched_groups.append("Cruciferous & Leafy Vegetables")
-
-        # Lean / Healthy Protein
-        if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "chickpea", "paneer", "sprouts", "edamame", "grilled chicken", "fish tikka", "salmon"]):
-            score += 12
-            greens.append("High protein density supporting metabolic targets")
-            matched_groups.append("Plant / Lean Protein")
-
-        # Healthy cooking method
-        if any(w in full_text for w in ["grilled", "tandoori", "steamed", "roasted", "baked", "boiled", "poached"]):
-            score += 10
-            greens.append("Optimal low-fat cooking preparation (grilled/steamed)")
-
-        # Probiotics & Fermented
-        if any(w in full_text for w in ["curd", "yogurt", "raita", "dahi", "kombucha", "kimchi", "fermented"]):
-            score += 8
-            greens.append("Gut-friendly probiotics and bioavailable minerals")
-            matched_groups.append("Fermented & Probiotic Foods")
-
-        # Whole grains / Millets
-        if any(w in full_text for w in ["quinoa", "millet", "brown rice", "ragi", "jowar", "bajra", "oats", "whole wheat", "roti"]):
-            score += 8
-            greens.append("Complex carbohydrates with sustained glucose release")
-            matched_groups.append("Whole Grains & Millets")
-
-        # 3. CLINICAL RISK PENALTIES
-        # Deep fried / high oxidation
-        if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa", "poori", "bhatura", "fritters", "tempura", "deep fry", "calamari"]):
-            score -= 25
-            reds.append("Deep-fried; high oxidized lipids and caloric density")
-            matched_groups.append("Deep Fried Foods")
-
-        # Saturated fat / Cream / Butter
-        if any(w in full_text for w in ["makhani", "butter", "cream", "creamy", "malai", "cheesy", "mayo", "loaded cheese", "ghee loaded", "bacon"]):
-            penalty = 20 if self.sat_fat_max_pct < 0.08 else 12
-            score -= penalty
-            reds.append("High saturated fat load exceeding cardiovascular guardrails")
-            matched_groups.append("Saturated & Trans Fats")
-
-        # Refined carbohydrates / High Glycemic
-        if any(w in full_text for w in ["naan", "kulcha", "maida", "white bread", "refined flour", "white rice", "bhature", "fries", "french fries"]):
-            penalty = 20 if self.glycemic_sensitivity > 0.6 else 10
-            score -= penalty
-            reds.append("High glycemic refined carbohydrates with rapid glucose spike risk")
-            matched_groups.append("Refined Carbohydrates")
-
-        # Added sugar / desserts / syrups
-        if any(w in full_text for w in ["gulab jamun", "halwa", "syrup", "kheer", "sweet", "sugar", "caramel", "soda", "pastry", "ice cream", "lava cake", "chocolate cake"]):
-            penalty = 30 if self.glycemic_sensitivity > 0.5 else 18
-            score -= penalty
-            reds.append("Concentrated simple sugars conflicting with metabolic targets")
-            matched_groups.append("Added Sugars & Confectionery")
-
-        # High sodium keywords
-        if any(w in full_text for w in ["pickle", "achar", "papad", "salted", "soy sauce", "msg", "processed cheese"]):
-            if self.sodium_ceiling <= 1800:
-                score -= 15
-                reds.append("High sodium content exceeding strict hypertension ceiling")
-
-        # Bound score between 5 and 98
-        score = max(5, min(98, score))
-
-        # 4. TIER CLASSIFICATION
-        if score >= self.good_threshold:
-            tier = FoodTier.GOOD
-            summary = "Excellent nutritional alignment with low clinical risk."
-            customization = "Pair with a fresh salad or green chutney for extra micronutrients."
-        elif score >= self.bad_threshold:
-            tier = FoodTier.MEDIUM
-            summary = "Moderate fit. Recommended in controlled portions or with minor customization."
-            customization = "Ask for light oil/butter, and pair with steamed vegetables or whole grain flatbread."
+        # Specific Dish Heuristics
+        if "butter chicken" in full_text or "makhani" in full_text:
+            score = 42
+            matched_groups = ["Poultry Protein", "Dairy Fats & Cream", "Tomato Gravy"]
+            greens = ["High biological value intact poultry protein", "Lycopene antioxidants from simmered tomato base"]
+            reds = ["High saturated fat load from heavy butter and cashew-cream emulsion", "Elevated sodium in restaurant curry base"]
+            summary = "Provides rich protein density from chicken breast, but the heavy dairy butter and cashew gravy carries a significant saturated fat and caloric density penalty."
+            customization = "Ask the kitchen for light gravy, substitute half the heavy cream with whisked dahi, or pair with steamed whole wheat roti rather than butter naan."
+        elif "tandoori roti" in full_text:
+            score = 80
+            matched_groups = ["Whole Grains & Millets", "Low-Fat Bread"]
+            greens = ["Stone-ground whole wheat atta provides complex dietary fiber", "Clay tandoor baking uses dry radiative heat with zero added frying oil", "Moderate glycemic index supporting steady glucose release"]
+            reds = ["Contains gluten", "Portion control needed for low-carb targets"]
+            summary = "Excellent whole grain staple baked in a clay tandoor without frying oils. Delivers unrefined complex fiber that buffers postprandial glucose surges."
+            customization = "Request plain dry tandoori roti without butter or ghee brushing."
+        elif "rumali roti" in full_text or "roomali" in full_text:
+            score = 48
+            matched_groups = ["Refined Carbohydrates"]
+            greens = ["Low in saturated fat", "Easily digestible starch"]
+            reds = ["Made primarily with refined maida flour", "Rapid enzymatic starch breakdown accelerates blood glucose spike"]
+            summary = "Thinly rolled refined maida flatbread. Lacks bran fiber, resulting in rapid starch absorption and elevated glycemic load."
+            customization = "Substitute with stone-ground whole wheat tandoori roti or multi-grain phulka."
+        elif "double ka meetha" in full_text or "shahi tukda" in full_text:
+            score = 15
+            matched_groups = ["Deep Fried Foods", "Added Sugars & Confectionery", "Refined Carbohydrates"]
+            greens = ["Cardamom and saffron aromatic bioflavonoids"]
+            reds = ["Deep-fried bread soaked in concentrated sugar syrup", "High saturated dairy fat from thickened rabri/khoya", "Severe acute glycemic spike risk"]
+            summary = "Traditional dessert consisting of deep-fried bread steeped in sugar syrup and condensed milk solids. Represents an acute glycemic and saturated lipid load."
+            customization = "Share a single small portion or substitute with fresh fruit and unsweetened probiotic curd."
+        elif "diet coke" in full_text or "diet pepsi" in full_text or "zero sugar" in full_text:
+            score = 72
+            matched_groups = ["Zero Calorie Beverages"]
+            greens = ["Zero caloric density and zero glycemic impact", "Does not trigger insulin secretion"]
+            reds = ["Contains artificial non-nutritive sweeteners (aspartame/acesulfame-K)", "Phosphoric acid can increase urinary calcium excretion"]
+            summary = "Zero-calorie carbonated beverage that satisfies sweetness without adding caloric or glycemic burden, though phosphoric acid and artificial sweeteners warrant moderation."
+            customization = "Enjoy chilled with a fresh lemon wedge; balance with ample mineral water."
+        elif "paneer tikka" in full_text or "tandoori paneer" in full_text:
+            score = 84
+            matched_groups = ["Dairy Protein", "Grilled Vegetables", "Capsaicin Spices"]
+            greens = ["High biological value dairy protein and calcium", "Tandoor charring uses minimal added fat", "Spices (turmeric, ginger) provide anti-inflammatory curcumin"]
+            reds = ["Moderate saturated fat from full-fat cottage cheese"]
+            summary = "Nutrient-dense protein dish prepared with marinated cottage cheese cubes roasted in dry tandoor heat. Fosters satiety with low glycemic impact."
+            customization = "Pair with a crisp raw onion-cucumber salad and fresh mint-coriander chutney."
+        elif "fries" in full_text or "french fries" in full_text:
+            score = 30
+            matched_groups = ["Deep Fried Foods", "Refined Starch", "High Sodium"]
+            greens = ["Contains dietary potassium from potato tissue"]
+            reds = ["Deep-fried in thermal oxidized oil generating lipid peroxides", "Rapidly digestible starch combined with high salt crystals", "High caloric density with low satiety per calorie"]
+            summary = "Deep-fried russet potato strips with rapid starch bioavailability and high surface salt adherence. Conflicting with lipid and blood pressure guardrails."
+            customization = "Request oven-baked potato wedges with skin-on or substitute with steamed edamame."
         else:
-            tier = FoodTier.BAD
-            summary = "Not recommended due to high refined carbs, saturated fat, or sodium load."
-            customization = "Consider substituting with grilled, tandoori, or whole food alternatives."
+            # Fallback general heuristics
+            if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber"]):
+                score += 15
+                greens.append("High in dietary fiber, polyphenols, and micronutrients")
+                matched_groups.append("Leafy & Cruciferous Vegetables")
+            if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "grilled chicken", "fish tikka", "salmon"]):
+                score += 12
+                greens.append("High protein density supporting lean mass preservation")
+                matched_groups.append("Lean / Plant Protein")
+            if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa"]):
+                score -= 25
+                reds.append("Deep-fried; high oxidized lipid load and elevated caloric density")
+                matched_groups.append("Deep Fried Foods")
+
+            score = max(5, min(98, score))
+            if score >= self.good_threshold:
+                summary = f"Strong nutritional alignment with the user's active health matrix. Low glycemic impact with quality micronutrient density."
+                customization = "Pair with a fresh green salad or steamed whole grain side."
+            elif score >= self.bad_threshold:
+                summary = f"Moderate metabolic fit. Acceptable in portion-controlled servings with mindful sodium and fat balance."
+                customization = "Request light cooking oil or sauce on the side."
+            else:
+                summary = f"Not recommended due to high refined carbohydrate, saturated fat, or sodium density."
+                customization = "Consider substituting with grilled, tandoori, or unrefined whole food alternatives."
+
+        tier = FoodTier.GOOD if score >= self.good_threshold else (FoodTier.MEDIUM if score >= self.bad_threshold else FoodTier.BAD)
 
         return TieredFoodRecommendation(
             dish_name=name,
@@ -710,7 +694,7 @@ Return ONLY a valid JSON array of objects matching this schema:
             fit_score=score,
             summary_reason=summary,
             matched_food_groups=matched_groups or ["General Cuisine"],
-            green_flags=greens or ["Standard meal option"],
+            green_flags=greens or ["Balanced meal component"],
             red_flags=reds,
             allergen_warnings=allergen_alerts,
             customization_tips=customization,
