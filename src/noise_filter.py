@@ -35,9 +35,12 @@ class AdvancedNoiseFilter:
     # 2. Template branding, banners, and decorative noise
     BRANDING_REGEXES = [
         r"^\s*(?:fast\s*food(?:\s*menu)?|food\s*menu|restaurant(?:\s*menu)?|cafe\s*menu|hotel\s*menu|bar\s*menu)\s*$",
-        r"^\s*(?:menu|the\s*menu|daily\s*menu|our\s*menu|today['’]?s\s*menu|special\s*menu)\s*$",
-        r"^\s*(?:welcome|delicious|fresh\s*&?\s*tasty|authentic\s*taste|quality\s*food|best\s*taste|delicious\s*&?\s*tasty)\s*$",
+        r"^\s*(?:the\s*menu|daily\s*menu|our\s*menu|today['’]?s\s*menu|special\s*menu)\s*$",
+        r"^\s*(?:welcome|delicious|fresh\s*&?\s*tasty|authentic\s*taste|quality\s*food|best\s*taste)\s*$",
         r"^\s*(?:your\s*logo(?:\s*here)?|logo\s*here|company\s*name|tagline\s*here|brand\s*name)\s*$",
+        r"\b(?:a\s+legend(?:\s*[:\-]\s*|\s+)since\b.*)",
+        r"\b(?:since\s+\d{4})\b",
+        r"^\s*(?:a\s+legend\s+since\b.*|legendary\s+since\b.*)\s*$",
         r"^\s*[xX\+\*\#\~\=\-\_]{2,}\s*$",  # e.g. "XX", "+++", "***", "==="
         r"^\s*[0-9\W_]+\s*$",               # Pure numbers/punctuation without words (excluding prices)
     ]
@@ -49,7 +52,7 @@ class AdvancedNoiseFilter:
         (r"\b(hot\s+dog|hotdog)\b", "Hot Dog"),
         (r"\b(cheese\s+cake|cheesecak)\b", "Cheesecake"),
         (r"\b(ice\s+tea|icetea)\b", "Iced Tea"),
-        (r"\b(panner|paneer\s*tikka)\b", "Paneer"),
+        (r"\b(panner)\b", "Paneer"),
         (r"\b(hushroon|hushrooms)\b", "Mushroom"),
         (r"\b(hasale|hasala|hacala)\b", "Masala"),
         (r"\b(ohicken|chickon|chiken)\b", "Chicken"),

@@ -242,36 +242,29 @@ export default function MenuUploadSection({
             ) : (
               <div className="flex-1 overflow-y-auto max-h-[320px] bg-white">
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase tracking-wider sticky top-0 border-b border-slate-200">
+                  <thead className="bg-slate-50 text-slate-600 text-[11px] font-bold uppercase tracking-wider sticky top-0 border-b border-slate-200">
                     <tr>
-                      <th className="py-2.5 px-3 w-10">#</th>
-                      <th className="py-2.5 px-3">Dish Name</th>
-                      <th className="py-2.5 px-3">Category</th>
-                      <th className="py-2.5 px-3 text-right">Price</th>
-                      <th className="py-2.5 px-3 w-10 text-center">Action</th>
+                      <th className="py-3 px-4 w-12 text-center">#</th>
+                      <th className="py-3 px-4">Food Item</th>
+                      <th className="py-3 px-4 w-16 text-center">Delete</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {dishes.map((dish, idx) => (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors group">
-                        <td className="py-2.5 px-3 text-slate-400 tabular-nums font-mono">{idx + 1}</td>
-                        <td className="py-2.5 px-3">
-                          <div className="font-bold text-slate-900">{dish.name}</div>
-                          {dish.description && (
-                            <div className="text-[11px] text-slate-500 truncate max-w-[220px]">{dish.description}</div>
-                          )}
+                        <td className="py-3 px-4 text-slate-400 tabular-nums font-mono text-center font-bold">
+                          {idx + 1}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-500 text-[11px]">{dish.section || 'Main'}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700 tabular-nums">
-                          {dish.price || '-'}
+                        <td className="py-3 px-4">
+                          <span className="font-bold text-slate-900 text-sm">{dish.name}</span>
                         </td>
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-3 px-4 text-center">
                           <button
                             onClick={() => removeDish(idx)}
-                            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-[0.96] cursor-pointer"
-                            title="Remove dish"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-[0.96] cursor-pointer inline-flex items-center justify-center"
+                            title="Delete item"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
