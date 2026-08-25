@@ -8,6 +8,7 @@ import re
 import difflib
 import numpy as np
 from .models import BoundingBox, TextBlock, MenuItem, MenuSection, RecognizedMenu
+from .noise_filter import AdvancedNoiseFilter
 
 
 
@@ -30,27 +31,30 @@ class MenuParser:
         "punjabi", "mughlai", "thai", "mexican", "italian", "breads", "biryani", "rice & noodles"
     }
 
-    # Dietary tags patterns
+    # Dietary tags patterns (use lookahead to avoid stripping 'Hot' in 'Hot Dog')
     DIETARY_PATTERNS = [
         (r"\b(v|vg|veg|vegetarian)\b", "Vegetarian"),
         (r"\b(vegan)\b", "Vegan"),
         (r"\b(gf|gluten[- ]free)\b", "Gluten-Free"),
         (r"\b(df|dairy[- ]free)\b", "Dairy-Free"),
         (r"\b(halal)\b", "Halal"),
-        (r"\b(spicy|hot|mild)\b", "Spicy"),
+        (r"\b(spicy|hot(?!\s*dog)|mild)\b", "Spicy"),
         (r"\b(keto|low[- ]carb)\b", "Keto"),
         (r"\b(nuts|contains nuts|nut[- ]free)\b", "Nuts"),
     ]
 
     # Non-food metadata lines to filter out (business info, timings, slogans, templates, footer noise)
     NON_FOOD_PATTERNS = [
-        r"\b(phone|tel|mobile|call|contact|email|website|www\.|http|\.com|\.in|\.org)\b",
+        r"\b(phone|tel|mobile|call|contact|email|website|www\.|http|\.com|\.in|\.org|\.site)\b",
         r"\b(gst|vat|tax|taxes|service charge|fssai|license|lic no|govt)\b",
         r"\b(address|road|street|nagar|colony|opp|near|floor|cross|lane|pin\s*code)\b",
         r"\b(terms & conditions|conditions apply|all rights reserved|thank you|visit again)\b",
         r"\b(opening hours|timings?|available\s+every|available\s+daily|available\s+on|mon|tue|wed|thu|fri|sat|sun|am|pm)\b",
         r"\b(take[- ]?outs?|take[- ]?away|delivery|pick[- ]?up|order\s+online|dine[- ]?in)\b",
         r"\b(company\s+name|company\s+number|your\s+logo|your\s+company|logo|slogan|tagline|refinement|indulge)\b",
+        r"\b(fast\s+food(\s+menu)?|restaurant(\s+menu)?|food\s+menu)\b",
+        r"\b(fastfoodrestaurant|restaurant\.site|\.site\.com)\b",
+        r"^\s*xx+\s*$",
         r"\[.*?(company|logo|number|phone|name|address|website|email).*?\]",
         r"^\s*\(.*?(additional|extra|with cheese|add-on|addon|toppings?).*?\)\s*$", # Add-on notes
         r"\badditional\s+(rs|re|ro|\₹|\$)\b",
@@ -76,6 +80,7 @@ class MenuParser:
 
     def __init__(self, confidence_threshold: float = 0.3):
         self.confidence_threshold = confidence_threshold
+        self.noise_filter = AdvancedNoiseFilter()
 
     RESTAURANT_TITLE_WORDS = {"restaurant", "trattoria", "bistro", "cafe", "kitchen", "grill", "bar & grill", "pizzeria", "the bistro"}
 
@@ -173,11 +178,10 @@ class MenuParser:
         (r"\bchickon\b", "Chicken"),
         (r"\bhadurai\b", "Madurai"),
         (r"\bkadurai\b", "Madurai"),
-        (r"\bmloo\b", "Aloo"),
-        (r"\bprench\b", "French"),
-        (r"\bperie\b", "Peri peri"),
-        (r"\bspicypanner\b", "Spicy Paneer"),
-        (r"\bspicy panner\b", "Spicy Paneer"),
+        (r"\b(french\s+friea|french\s+fries?s?|friea)\b", "French Fries"),
+        (r"^\s*dog\s*$", "Hot Dog"),
+        (r"\bice\s+tea\b", "Iced Tea"),
+        (r"\bcheese\s+cake\b", "Cheesecake"),
         (r"\bvee\b", "veg"),
     ]
 
@@ -223,6 +227,12 @@ class MenuParser:
     def is_non_food_line(self, text: str) -> bool:
         """Filters out non-food noise like addresses, phone numbers, taxes, licensing, etc."""
         lower = text.lower().strip()
+        if self.noise_filter.is_metadata_or_business_noise(lower):
+            return True
+        if self.noise_filter.is_branding_or_decorative_noise(lower):
+            return True
+        if self.noise_filter.is_gibberish_or_low_entropy(lower):
+            return True
         for pattern in self.NON_FOOD_PATTERNS:
             if re.search(pattern, lower):
                 return True
@@ -249,6 +259,9 @@ class MenuParser:
         # Apply common OCR corrections for standard menu terms
         for pattern, replacement in self.COMMON_OCR_FOOD_FIXES:
             name = re.sub(pattern, replacement, name, flags=re.IGNORECASE)
+
+        # Apply multi-layer canonical noise filter normalizer
+        name = self.noise_filter.clean_and_normalize_food_name(name)
 
         # Clean extra whitespace
         name = re.sub(r"\s+", " ", name).strip()
@@ -441,23 +454,25 @@ class MenuParser:
 
             # Otherwise, it is a new food item (or unpriced special)
             if len(clean_name) >= 3 and any(c.isalpha() for c in clean_name):
-                sec_name = current_section.title if current_section else None
-                fallback_item = MenuItem(
-                    name=clean_name,
-                    price=None,
-                    raw_price=None,
-                    currency=None,
-                    description=None,
-                    section=sec_name,
-                    dietary_tags=tags,
-                    confidence=block.confidence,
-                    bbox=block.bbox,
-                )
-                if current_section:
-                    current_section.items.append(fallback_item)
-                else:
-                    unclassified_items.append(fallback_item)
-                last_item = fallback_item
+                if not self.is_non_food_line(clean_name) and not any(w in clean_name.lower() for w in self.RESTAURANT_TITLE_WORDS):
+                    if current_section or self.is_food_item_title(clean_name):
+                        sec_name = current_section.title if current_section else None
+                        fallback_item = MenuItem(
+                            name=clean_name,
+                            price=None,
+                            raw_price=None,
+                            currency=None,
+                            description=None,
+                            section=sec_name,
+                            dietary_tags=tags,
+                            confidence=block.confidence,
+                            bbox=block.bbox,
+                        )
+                        if current_section:
+                            current_section.items.append(fallback_item)
+                        else:
+                            unclassified_items.append(fallback_item)
+                        last_item = fallback_item
 
             i += 1
 

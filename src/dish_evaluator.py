@@ -7,51 +7,32 @@ and highlighting green flags / medical warnings.
 
 from typing import List, Dict, Any, Optional, Union
 import json
-import os
+import logging
 from pathlib import Path
-import requests
 
+from .config import get_gemini_api_key, get_gemini_model_name
+from .gemini_client import GeminiClient, GeminiAPIError
 from .models import MenuItem, RecognizedMenu
 from .user_models import NutritionalMatrixProfile, DishEvaluationResult
+
+logger = logging.getLogger(__name__)
 
 
 class MenuDishEvaluator:
     """Evaluates menu dishes against a user's NutritionalMatrixProfile using AI or heuristic scoring."""
 
-    CANDIDATE_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-    ]
-
-    def __init__(self, user_matrix: NutritionalMatrixProfile, api_key: Optional[str] = None, model_name: Optional[str] = None):
+    def __init__(
+        self,
+        user_matrix: NutritionalMatrixProfile,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        gemini_client: Optional[GeminiClient] = None,
+    ):
         self.user_matrix = user_matrix
-        self.api_key = api_key or self._load_api_key()
-        self.model_name = model_name or "gemini-3.6-flash"
-
-    def _load_api_key(self) -> Optional[str]:
-        if "GEMINI_API_KEY" in os.environ and os.environ["GEMINI_API_KEY"].strip():
-            return os.environ["GEMINI_API_KEY"].strip()
-
-        current = Path.cwd()
-        for path in [current / ".env", current.parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
-                                key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                if key:
-                                    os.environ["GEMINI_API_KEY"] = key
-                                    return key
-                except Exception:
-                    pass
-        return None
+        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
 
     def is_available(self) -> bool:
-        return bool(self.api_key and self.api_key.strip())
+        return self.gemini_client.is_available()
 
     def evaluate_dish(self, dish: Union[MenuItem, str]) -> DishEvaluationResult:
         """Evaluates a single dish or MenuItem object."""
@@ -65,7 +46,7 @@ class MenuDishEvaluator:
                 if results:
                     return results[0]
             except Exception as e:
-                print(f"[MenuDishEvaluator] AI evaluation error ({e}), falling back to heuristic.")
+                logger.warning("[MenuDishEvaluator] AI evaluation error (%s), falling back to heuristic.", e)
 
         return self._evaluate_dish_heuristic(dish_name, dish_desc, dietary_tags)
 
@@ -99,7 +80,7 @@ class MenuDishEvaluator:
             try:
                 evaluations = self._evaluate_batch_ai(dishes)
             except Exception as e:
-                print(f"[MenuDishEvaluator] Batch AI failed ({e}), using heuristic.")
+                logger.warning("[MenuDishEvaluator] Batch AI failed (%s), using heuristic.", e)
                 evaluations = [self._evaluate_dish_heuristic(d["name"], d["description"], d["tags"]) for d in dishes]
         else:
             evaluations = [self._evaluate_dish_heuristic(d["name"], d["description"], d["tags"]) for d in dishes]
@@ -154,49 +135,14 @@ Return ONLY valid JSON array with this structure:
   }}
 ]
 """
-
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.1
-            }
-        }
-
-        headers = {"Content-Type": "application/json"}
-        models_to_try = [self.model_name] if self.model_name else self.CANDIDATE_MODELS
-        
-        last_error = None
-        response_json = None
-
-        for model in models_to_try:
-            if not model:
-                continue
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
-            try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                if resp.status_code == 200:
-                    result = resp.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        content = candidates[0].get("content", {}).get("parts", [])
-                        if content and "text" in content[0]:
-                            response_json = json.loads(content[0]["text"])
-                            break
-                elif resp.status_code == 404:
-                    last_error = f"Model '{model}' not found."
-                    continue
-                else:
-                    last_error = f"API Error {resp.status_code}: {resp.text}"
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if response_json is None:
-            raise RuntimeError(f"Gemini dish evaluation failed: {last_error}")
+        response_json = self.gemini_client.generate_json(prompt, temperature=0.1)
 
         if isinstance(response_json, dict) and "dishes" in response_json:
             response_json = response_json["dishes"]
+        elif isinstance(response_json, dict) and "recommendations" in response_json:
+            response_json = response_json["recommendations"]
+        elif not isinstance(response_json, list):
+            raise GeminiAPIError("Expected JSON array of dish evaluations.")
 
         results: List[DishEvaluationResult] = []
         for d in response_json:
@@ -225,8 +171,8 @@ Return ONLY valid JSON array with this structure:
 
         # Check allergens & strict diets
         exclusions = [ex.lower() for ex in self.user_matrix.excluded_allergens_and_restrictions]
-        if any("veg" in ex for ex in exclusions):
-            non_veg_keywords = ["chicken", "mutton", "beef", "pork", "fish", "prawn", "meat", "bacon", "lamb", "egg"]
+        if any("veg" in ex for ex in exclusions if ex not in ("non-veg", "non_veg")):
+            non_veg_keywords = ["chicken", "mutton", "beef", "pork", "fish", "prawn", "meat", "bacon", "lamb", "egg", "squid", "salmon", "calamari"]
             if any(k in text for k in non_veg_keywords):
                 return DishEvaluationResult(
                     dish_name=dish_name,
@@ -234,14 +180,14 @@ Return ONLY valid JSON array with this structure:
                     verdict="Violates Diet/Allergy",
                     matched_food_groups=["Animal Meat"],
                     green_flags=[],
-                    red_flags=["Contains meat/poultry, violating vegetarian preference."],
+                    red_flags=["Contains meat/poultry/seafood, violating vegetarian preference."],
                     customization_tips="Choose a vegetarian alternative like Dal or Paneer."
                 )
 
-        for allergy in self.user_matrix.clinical_guardrails.digestive_triggers_to_avoid:
-            if allergy.lower() in text:
+        for trigger in self.user_matrix.clinical_guardrails.digestive_triggers_to_avoid:
+            if trigger.lower() in text:
                 score -= 30
-                reds.append(f"Contains sensitivity trigger: {allergy}")
+                reds.append(f"Contains sensitivity trigger: {trigger}")
 
         # Positive keywords
         if any(w in text for w in ["salad", "spinach", "broccoli", "greens", "cucumber", "methi", "saag", "vegetable"]):

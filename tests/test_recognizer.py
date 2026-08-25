@@ -4,6 +4,7 @@ Generates synthetic menu images to validate the entire CV/OCR and parsing pipeli
 """
 
 import os
+import io
 import tempfile
 import pytest
 import numpy as np
@@ -177,3 +178,28 @@ def test_end_to_end_recognition():
         # Verify JSON serializability
         json_str = menu.to_json()
         assert len(json_str) > 100
+
+
+def test_pil_and_bytes_image_inputs():
+    """Verify Preprocessor and Pipeline accept PIL Image and BytesIO without TypeError."""
+    preprocessor = Preprocessor()
+    
+    # 1. PIL Image
+    pil_img = Image.new("RGB", (200, 200), color=(255, 255, 255))
+    processed, meta = preprocessor.process(pil_img)
+    assert processed is not None
+    assert processed.shape[0] > 0
+
+    # 2. BytesIO PNG
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    buf.seek(0)
+    png_pil = Image.open(buf)
+    processed_png, meta_png = preprocessor.process(png_pil)
+    assert processed_png is not None
+
+    # 3. Raw Bytes
+    raw_bytes = buf.getvalue()
+    processed_bytes, meta_bytes = preprocessor.process(raw_bytes)
+    assert processed_bytes is not None
+

@@ -2,15 +2,19 @@
 AI-Powered Nutritional & Health Metric Matrix Generator.
 Transforms raw user input (biometrics, health conditions, lifestyle, goals)
 into a standardized multi-dimensional mathematical and clinical matrix
-ready for consumption by external recommendation systems, optimizers, or databases.
+ready for consumption by recommendation systems, optimizers, or databases.
 """
 
 from typing import List, Dict, Any, Optional, Union
-import os
 import json
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-import requests
+
+from .config import get_gemini_api_key, get_gemini_model_name
+from .gemini_client import GeminiClient, GeminiAPIError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -165,14 +169,7 @@ class AIMatrixGenerator:
     a standardized UserNutritionalMatrix.
     """
 
-    CANDIDATE_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-    ]
-
-    # Standardized 22 Food Group Taxonomies for the Matrix
+    # Standardized 24 Food Group Taxonomies for the Matrix
     STANDARD_FOOD_GROUPS = [
         "cruciferous_vegetables",
         "dark_leafy_greens",
@@ -200,32 +197,16 @@ class AIMatrixGenerator:
         "deep_fried_and_ultra_processed"
     ]
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or self._load_api_key()
-        self.model_name = model_name or "gemini-3.6-flash"
-
-    def _load_api_key(self) -> Optional[str]:
-        if "GEMINI_API_KEY" in os.environ and os.environ["GEMINI_API_KEY"].strip():
-            return os.environ["GEMINI_API_KEY"].strip()
-
-        current = Path.cwd()
-        for path in [current / ".env", current.parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
-                                key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                if key:
-                                    os.environ["GEMINI_API_KEY"] = key
-                                    return key
-                except Exception:
-                    pass
-        return None
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        gemini_client: Optional[GeminiClient] = None,
+    ):
+        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
 
     def is_available(self) -> bool:
-        return bool(self.api_key and self.api_key.strip() and not self.api_key.startswith("mock_"))
+        return self.gemini_client.is_available()
 
     def generate(self, user_input: Union[Dict[str, Any], str], user_id: Optional[str] = None) -> UserNutritionalMatrix:
         """
@@ -236,7 +217,7 @@ class AIMatrixGenerator:
             try:
                 return self._generate_ai(user_input, user_id)
             except Exception as e:
-                print(f"[AIMatrixGenerator] AI generation failed ({e}), falling back to deterministic baseline calculator.")
+                logger.warning("[AIMatrixGenerator] AI generation failed (%s), falling back to deterministic baseline calculator.", e)
                 return self._generate_deterministic(user_input, user_id)
         else:
             return self._generate_deterministic(user_input, user_id)
@@ -351,48 +332,8 @@ Return ONLY valid JSON matching this exact structure:
   "exclusion_mask": ["peanuts", "meat", "poultry", "fish", "shellfish"]
 }}
 """
-
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.15
-            }
-        }
-
-        headers = {"Content-Type": "application/json"}
-        models_to_try = [self.model_name] if self.model_name else self.CANDIDATE_MODELS
-        
-        last_error = None
-        response_json = None
-
-        for model in models_to_try:
-            if not model:
-                continue
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
-            try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=25)
-                if resp.status_code == 200:
-                    result = resp.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        content = candidates[0].get("content", {}).get("parts", [])
-                        if content and "text" in content[0]:
-                            response_json = json.loads(content[0]["text"])
-                            break
-                elif resp.status_code == 404:
-                    last_error = f"Model '{model}' not found."
-                    continue
-                else:
-                    last_error = f"API Error {resp.status_code}: {resp.text}"
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if response_json is None:
-            raise RuntimeError(f"Matrix generation failed via Gemini: {last_error}")
-
-        return self._parse_json_matrix(response_json, user_id=user_id, model_name=model)
+        response_json = self.gemini_client.generate_json(prompt, temperature=0.15)
+        return self._parse_json_matrix(response_json, user_id=user_id, model_name=self.gemini_client.model_name)
 
     def _parse_json_matrix(self, data: Dict[str, Any], user_id: Optional[str] = None, model_name: str = "Gemini-Flash") -> UserNutritionalMatrix:
         """Constructs UserNutritionalMatrix object from validated JSON."""
@@ -459,10 +400,10 @@ Return ONLY valid JSON matching this exact structure:
         """Deterministic mathematical and clinical baseline calculation for offline fallback."""
         data = user_input if isinstance(user_input, dict) else {}
         
-        age = data.get("age", 30)
+        age = max(10, min(120, int(data.get("age", 30))))
         gender = str(data.get("gender", "male")).lower()
-        height = float(data.get("height_cm", 172.0))
-        weight = float(data.get("weight_kg", 72.0))
+        height = max(80.0, min(250.0, float(data.get("height_cm", 172.0))))
+        weight = max(25.0, min(300.0, float(data.get("weight_kg", 72.0))))
         activity = str(data.get("activity_level", "sedentary")).lower()
         goal = str(data.get("primary_goal", "maintenance")).lower()
         conditions = [str(c).lower() for c in data.get("health_conditions", [])]
@@ -520,9 +461,9 @@ Return ONLY valid JSON matching this exact structure:
         )
 
         # Risk weights
-        glycemic_w = 0.85 if any(c in conditions for c in ["diabetes", "type_2_diabetes", "pcos", "insulin_resistance"]) else 0.35
+        glycemic_w = 0.85 if any(c in conditions for c in ["diabetes", "type_2_diabetes", "pcos", "insulin_resistance", "pre_diabetes"]) else 0.35
         cvd_w = 0.90 if any(c in conditions for c in ["hypertension", "high_bp", "heart_disease"]) else 0.30
-        lipid_w = 0.80 if any(c in conditions for c in ["cholesterol", "hyperlipidemia", "ldl"]) else 0.35
+        lipid_w = 0.80 if any(c in conditions for c in ["cholesterol", "hyperlipidemia", "ldl", "fatty_liver"]) else 0.35
         reflux_w = 0.85 if any(c in conditions for c in ["gerd", "acid_reflux", "gastritis"]) else 0.20
         satiety_w = 0.80 if adj < 0.0 else 0.40
 
@@ -547,8 +488,9 @@ Return ONLY valid JSON matching this exact structure:
         )
 
         # Food group scoring
-        is_veg = any("veg" in d for d in diets)
-        meat_score = -10.0 if is_veg else 8.0
+        is_veg = any("veg" in d for d in diets if d not in ("non-veg", "non_veg", "non-vegetarian"))
+        is_vegan = any("vegan" in d for d in diets)
+        meat_score = -10.0 if (is_veg or is_vegan) else 8.0
 
         fg_weights = {
             "cruciferous_vegetables": 10.0,
@@ -559,16 +501,16 @@ Return ONLY valid JSON matching this exact structure:
             "refined_carbohydrates": -9.0,
             "legumes_pulses_and_beans": 9.0,
             "plant_based_proteins_tofu_tempeh": 8.5,
-            "fatty_coldwater_fish_omega3": -10.0 if is_veg else 9.0,
-            "lean_white_fish_and_seafood": -10.0 if is_veg else 8.0,
-            "lean_poultry": -10.0 if is_veg else 8.5,
-            "eggs_and_egg_whites": -10.0 if any("vegan" in d for d in diets) else 7.5,
-            "red_meat_and_game": -10.0 if is_veg else 2.0,
+            "fatty_coldwater_fish_omega3": -10.0 if (is_veg or is_vegan) else 9.0,
+            "lean_white_fish_and_seafood": -10.0 if (is_veg or is_vegan) else 8.0,
+            "lean_poultry": -10.0 if (is_veg or is_vegan) else 8.5,
+            "eggs_and_egg_whites": -10.0 if is_vegan else 7.5,
+            "red_meat_and_game": -10.0 if (is_veg or is_vegan) else 2.0,
             "processed_and_cured_meats": -10.0,
             "fermented_probiotic_foods": 8.0,
-            "low_fat_dairy": -10.0 if any("vegan" in d or "dairy" in allergies for d in diets) else 6.0,
+            "low_fat_dairy": -10.0 if (is_vegan or "dairy" in allergies) else 6.0,
             "full_fat_dairy_and_cheese": 1.0,
-            "nuts_and_seeds": 7.5,
+            "nuts_and_seeds": 7.5 if "peanuts" not in allergies and "tree_nuts" not in allergies else 2.0,
             "healthy_unsaturated_oils_olive_avocado": 8.0,
             "saturated_and_trans_fats": -9.5,
             "low_gi_berries_and_fruits": 8.0,
@@ -577,7 +519,12 @@ Return ONLY valid JSON matching this exact structure:
             "deep_fried_and_ultra_processed": -10.0
         }
 
-        exclusions = allergies + (["meat", "poultry", "fish"] if is_veg else [])
+        exclusions = list(allergies)
+        if is_veg or is_vegan:
+            exclusions.extend(["vegetarian", "meat", "poultry", "fish", "seafood", "beef", "pork", "mutton", "non-vegetarian"])
+        if is_vegan:
+            exclusions.extend(["vegan", "dairy", "eggs", "cheese", "paneer", "milk", "butter", "cream", "ghee"])
+        exclusions = list(dict.fromkeys(exclusions))
 
         return UserNutritionalMatrix(
             user_id=user_id,
@@ -589,9 +536,3 @@ Return ONLY valid JSON matching this exact structure:
             exclusion_mask=exclusions,
             metadata={"engine": "Deterministic-Baseline-Calculator"}
         )
-
-
-if __name__ == "__main__":
-    from examples.interactive_matrix_cli import main
-    main()
-

@@ -1,6 +1,7 @@
 """
 Unified Menu Recognition Pipeline and CLI entry point.
 Orchestrates preprocessing, local deep OCR, layout analysis, semantic parsing, and visualization.
+Supports in-memory PIL/bytes image inputs without leaving temporary files on disk.
 """
 
 from typing import Optional, Union, Dict, Any, List
@@ -8,8 +9,10 @@ import argparse
 import os
 import sys
 import time
+import io
 import cv2
 import numpy as np
+from PIL import Image
 
 from .models import RecognizedMenu
 from .preprocessing import Preprocessor
@@ -18,6 +21,7 @@ from .layout_analyzer import LayoutAnalyzer
 from .menu_parser import MenuParser
 from .gemini_extractor import GeminiMenuExtractor
 from .visualizer import MenuVisualizer
+from .config import DEFAULT_MIN_OCR_CONFIDENCE, get_gemini_api_key
 
 
 class MenuRecognitionPipeline:
@@ -29,7 +33,7 @@ class MenuRecognitionPipeline:
         gpu: Optional[bool] = None,
         enable_deskew: bool = True,
         enable_illumination_norm: bool = True,
-        min_ocr_confidence: float = 0.20,
+        min_ocr_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
         api_key: Optional[str] = None,
         prefer_gemini: bool = True,
     ):
@@ -45,18 +49,18 @@ class MenuRecognitionPipeline:
             min_confidence=min_ocr_confidence,
         )
         self.layout_analyzer = LayoutAnalyzer()
-        self.menu_parser = MenuParser()
+        self.menu_parser = MenuParser(confidence_threshold=min_ocr_confidence)
         self.visualizer = MenuVisualizer()
 
     def process_image(
         self,
-        image_input: Union[str, np.ndarray],
+        image_input: Union[str, np.ndarray, Image.Image, io.BytesIO],
         visualize_path: Optional[str] = None,
         use_gemini: Optional[bool] = None,
     ) -> RecognizedMenu:
         """
-        Runs the complete recognition pipeline on a menu image path or numpy array.
-        Uses Gemini Flash if configured, otherwise falls back to local PyTorch OCR engine.
+        Runs the complete recognition pipeline on a menu image path, numpy array, PIL Image, or BytesIO.
+        Uses Gemini Vision if configured and preferred, otherwise falls back to local PyTorch OCR engine.
         """
         should_use_gemini = (use_gemini if use_gemini is not None else self.prefer_gemini) and self.gemini_extractor.is_available()
 
@@ -72,7 +76,7 @@ class MenuRecognitionPipeline:
 
         start_time = time.time()
 
-        # Step 1: Preprocessing
+        # Step 1: Preprocessing & Image Validation
         preprocessed_img, prep_meta = self.preprocessor.process(image_input)
         h, w = preprocessed_img.shape[:2]
 
@@ -92,6 +96,7 @@ class MenuRecognitionPipeline:
             num_columns=num_cols,
         )
         recognized_menu.metadata["processing_time_sec"] = round(time.time() - start_time, 2)
+        recognized_menu.metadata["active_ocr_device"] = self.ocr_engine.active_device
 
         # Step 5: Optional Visualization
         if visualize_path:
@@ -101,7 +106,7 @@ class MenuRecognitionPipeline:
 
     def extract_menu_items(
         self,
-        image_input: Union[str, np.ndarray],
+        image_input: Union[str, np.ndarray, Image.Image, io.BytesIO],
         use_gemini: Optional[bool] = None,
     ) -> List[str]:
         """
@@ -155,7 +160,7 @@ def main():
 
     print("\n" + "=" * 50)
     print(f"RECOGNITION COMPLETE: Found {menu.total_items} items in {len(menu.sections)} sections")
-    print(f"Engine: {menu.metadata.get('extractor', 'Local-OCR')} | Model: {menu.metadata.get('model', 'CRAFT+CRNN')}")
+    print(f"Engine: {menu.metadata.get('extractor', 'Local-OCR')} | Model: {menu.metadata.get('model', 'CRAFT+CRNN')} | Device: {menu.metadata.get('active_ocr_device', 'cpu')}")
     print("=" * 50 + "\n")
 
     print("RECOGNIZED FOOD ITEMS:")
@@ -181,4 +186,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

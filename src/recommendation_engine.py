@@ -3,19 +3,29 @@
 Bridges Food & Menu Item Data (Food Groups, Ingredients, Macros) with User Health Matrices
 (Biometrics, Metabolic Targets, Clinical Guardrails, Allergens) to classify dishes into
 three distinct tiers: 🟢 GOOD, 🟡 MEDIUM, and 🔴 BAD.
+
+Architecture:
+1. Hard Safety Exclusions (Allergies & Strict Diets) -> Instant BAD (Fit Score = 0). AI CANNOT override.
+2. Clinical & Nutritional Scoring -> Deterministic explainable scoring based on metabolic targets & guardrails.
+3. 3-Tier Classification -> Thresholding into GOOD / MEDIUM / BAD.
+4. AI Enrichment (Optional) -> Natural language explanations and culinary tips without safety authority.
 """
 
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-import os
 import json
+import re
+import logging
 from pathlib import Path
-import requests
 
+from .config import DEFAULT_GOOD_THRESHOLD, DEFAULT_BAD_THRESHOLD
+from .gemini_client import GeminiClient, GeminiAPIError
 from .models import MenuItem, RecognizedMenu
 from .user_models import NutritionalMatrixProfile, DishEvaluationResult
 from .matrix_generator import UserNutritionalMatrix
+
+logger = logging.getLogger(__name__)
 
 
 class FoodTier(str, Enum):
@@ -123,7 +133,7 @@ class TieredRecommendationResult:
                     lines.append(f"- **Customization Tip**: *{item.customization_tips}*")
                 lines.append("")
         else:
-            lines.append("_No items qualified for Tier 1._\n")
+            lines.append("_No items qualified for Tier 1 based on current thresholds._\n")
 
         lines.append("## 🟡 Tier 2: MEDIUM (Moderate / Consume with Caution)")
         if self.medium_items:
@@ -163,11 +173,16 @@ class TieredFoodRecommender:
     clinical guardrails, metabolic targets, food group affinity scores, and strict exclusions.
     """
 
-    CANDIDATE_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
+    NON_VEG_KEYWORDS = [
+        "chicken", "mutton", "beef", "pork", "fish", "prawn", "prawns", "seafood", "meat",
+        "bacon", "lamb", "egg", "eggs", "shrimp", "shrimps", "squid", "duck", "poultry", "turkey",
+        "crab", "crabs", "lobster", "veal", "ham", "prosciutto", "salmon", "tuna", "steak",
+        "calamari", "anchovy", "pepperoni", "salami"
+    ]
+
+    VEGAN_EXCLUSIONS = [
+        "cheese", "paneer", "butter", "cream", "milk", "curd", "yogurt", "ghee",
+        "whey", "honey", "dairy", "mayo", "mayonnaise", "egg", "eggs", "omelette"
     ]
 
     def __init__(
@@ -175,48 +190,21 @@ class TieredFoodRecommender:
         user_matrix: Union[UserNutritionalMatrix, NutritionalMatrixProfile, Dict[str, Any]],
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        good_threshold: int = 75,
-        bad_threshold: int = 45,
+        gemini_client: Optional[GeminiClient] = None,
+        good_threshold: int = DEFAULT_GOOD_THRESHOLD,
+        bad_threshold: int = DEFAULT_BAD_THRESHOLD,
     ):
-        """
-        Initialize the Recommender with a User Matrix.
-        
-        Args:
-            user_matrix: The user's nutritional matrix profile or UserNutritionalMatrix.
-            api_key: Optional Gemini API key.
-            model_name: Gemini model name.
-            good_threshold: Minimum fit score (out of 100) to classify as GOOD (default: 75).
-            bad_threshold: Score below which an item is classified as BAD (default: 45).
-        """
         self.user_matrix = user_matrix
-        self.api_key = api_key or self._load_api_key()
-        self.model_name = model_name or "gemini-3.6-flash"
-        self.good_threshold = good_threshold
-        self.bad_threshold = bad_threshold
+        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        
+        # Enforce threshold validity (0 <= bad < good <= 100)
+        self.bad_threshold = max(0, min(95, int(bad_threshold)))
+        self.good_threshold = max(self.bad_threshold + 5, min(100, int(good_threshold)))
+
         self._normalize_user_context()
 
-    def _load_api_key(self) -> Optional[str]:
-        if "GEMINI_API_KEY" in os.environ and os.environ["GEMINI_API_KEY"].strip():
-            return os.environ["GEMINI_API_KEY"].strip()
-
-        current = Path.cwd()
-        for path in [current / ".env", current.parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
-                                key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                if key:
-                                    os.environ["GEMINI_API_KEY"] = key
-                                    return key
-                except Exception:
-                    pass
-        return None
-
     def is_available(self) -> bool:
-        return bool(self.api_key and self.api_key.strip())
+        return self.gemini_client.is_available()
 
     def _normalize_user_context(self):
         """Extracts standard user context fields whether input is UserNutritionalMatrix or NutritionalMatrixProfile."""
@@ -230,7 +218,7 @@ class TieredFoodRecommender:
             self.sat_fat_max_pct = u.nutritional_guardrails.saturated_fat_max_pct
             self.fiber_min_g = u.nutritional_guardrails.dietary_fiber_min_g
             self.digestive_triggers = u.nutritional_guardrails.digestive_triggers_to_avoid
-            self.exclusions = u.exclusion_mask
+            self.exclusions = [str(e).lower().strip() for e in u.exclusion_mask]
             self.food_group_weights = u.food_group_weights
         elif isinstance(u, NutritionalMatrixProfile):
             self.user_summary = u.user_summary
@@ -241,7 +229,7 @@ class TieredFoodRecommender:
             self.sat_fat_max_pct = u.clinical_guardrails.saturated_fat_max_pct
             self.fiber_min_g = u.clinical_guardrails.fiber_minimum_g
             self.digestive_triggers = u.clinical_guardrails.digestive_triggers_to_avoid
-            self.exclusions = u.excluded_allergens_and_restrictions
+            self.exclusions = [str(e).lower().strip() for e in u.excluded_allergens_and_restrictions]
             self.food_group_weights = {fg.food_group.lower().replace(" ", "_"): float(fg.score) for fg in u.food_group_affinities}
         elif isinstance(u, dict):
             self.user_summary = u.get("user_summary", "Custom User Profile")
@@ -252,7 +240,7 @@ class TieredFoodRecommender:
             self.sat_fat_max_pct = float(u.get("saturated_fat_max_pct", 0.08))
             self.fiber_min_g = float(u.get("dietary_fiber_min_g", 30))
             self.digestive_triggers = u.get("digestive_triggers_to_avoid", [])
-            self.exclusions = u.get("exclusion_mask", u.get("allergies", []))
+            self.exclusions = [str(e).lower().strip() for e in u.get("exclusion_mask", u.get("allergies", []))]
             self.food_group_weights = u.get("food_group_weights", {})
         else:
             self.user_summary = "Standard Nutritional Profile"
@@ -266,20 +254,119 @@ class TieredFoodRecommender:
             self.exclusions = []
             self.food_group_weights = {}
 
+    def check_hard_exclusions(self, dish_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Evaluates deterministic hard safety exclusions (allergens and strict dietary rules).
+        Returns a violation dict if violated, or None if safe.
+        """
+        lower_text = dish_text.lower()
+
+        # 1. Meat / Poultry / Fish exclusion check (Vegetarian / Vegan / Explicit Meat Exclusions)
+        has_meat_exclusion = any(
+            ex in ("vegetarian", "vegan", "pescatarian", "meat", "poultry", "fish", "seafood", "beef", "pork", "chicken", "mutton")
+            or ("veg" in ex and ex not in ("non-veg", "non_veg", "non-vegetarian"))
+            for ex in self.exclusions
+        )
+
+        if has_meat_exclusion:
+            matched_non_veg = [kw for kw in self.NON_VEG_KEYWORDS if re.search(r"\b" + re.escape(kw) + r"\b", lower_text)]
+            if matched_non_veg:
+                return {
+                    "tier": FoodTier.BAD,
+                    "fit_score": 0,
+                    "summary_reason": f"Violates dietary restriction (contains non-vegetarian item: {', '.join(matched_non_veg)}).",
+                    "matched_food_groups": ["Animal Meat"],
+                    "green_flags": [],
+                    "red_flags": [f"Contains non-vegetarian animal meat/seafood: {', '.join(matched_non_veg)}"],
+                    "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({matched_non_veg[0]})"],
+                    "customization_tips": "Select a plant-based or dairy protein alternative.",
+                }
+
+        # 2. Vegan / Dairy / Egg exclusion check
+        has_vegan_exclusion = any(ex in ("vegan", "dairy", "eggs", "egg", "milk", "cheese", "paneer", "butter") for ex in self.exclusions)
+        if has_vegan_exclusion:
+            matched_dairy_egg = [kw for kw in self.VEGAN_EXCLUSIONS if re.search(r"\b" + re.escape(kw) + r"\b", lower_text)]
+            if matched_dairy_egg:
+                return {
+                    "tier": FoodTier.BAD,
+                    "fit_score": 0,
+                    "summary_reason": f"Violates vegan/dairy restriction (contains animal byproduct: {', '.join(matched_dairy_egg)}).",
+                    "matched_food_groups": ["Dairy / Egg"],
+                    "green_flags": [],
+                    "red_flags": [f"Contains dairy/egg byproduct: {', '.join(matched_dairy_egg)}"],
+                    "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({matched_dairy_egg[0]})"],
+                    "customization_tips": "Ask for dairy-free or plant-based preparation.",
+                }
+
+        # 3. Strict Allergens Matching
+        diet_keywords = {"vegetarian", "vegan", "pescatarian", "halal", "kosher", "omnivore", "non-veg", "non-vegetarian", "meat", "poultry", "fish", "seafood", "dairy", "eggs", "egg", "milk", "cheese", "paneer"}
+        for allergy in self.exclusions:
+            if allergy in diet_keywords:
+                continue
+
+            allergy_words = [allergy]
+            if allergy.endswith("s"):
+                allergy_words.append(allergy[:-1])
+            else:
+                allergy_words.append(f"{allergy}s")
+
+            if allergy in ("peanut", "peanuts"):
+                allergy_words.extend(["peanut butter", "groundnut", "groundnuts", "arachis"])
+            elif allergy in ("gluten", "wheat"):
+                allergy_words.extend(["wheat", "maida", "naan", "roti", "bread", "pasta", "gluten"])
+            elif allergy in ("tree_nuts", "tree_nut", "nuts"):
+                allergy_words.extend(["walnut", "walnuts", "almond", "almonds", "cashew", "cashews", "pistachio", "pistachios", "hazelnut", "hazelnuts"])
+            elif allergy in ("shellfish", "crustacean"):
+                allergy_words.extend(["prawn", "prawns", "shrimp", "shrimps", "crab", "crabs", "lobster", "lobsters"])
+
+            for target in allergy_words:
+                if re.search(r"\b" + re.escape(target) + r"\b", lower_text):
+                    return {
+                        "tier": FoodTier.BAD,
+                        "fit_score": 0,
+                        "summary_reason": f"Strictly forbidden: contains declared allergen '{allergy}' ({target}).",
+                        "matched_food_groups": [f"Allergen: {allergy}"],
+                        "green_flags": [],
+                        "red_flags": [f"Critical allergen detected: {allergy}"],
+                        "allergen_warnings": [f"Contains allergen: {allergy}"],
+                        "customization_tips": "Request completely separate allergen-free preparation or select a different dish.",
+                    }
+
+        return None
+
     def recommend_dish(self, dish: Union[MenuItem, Dict[str, Any], str]) -> TieredFoodRecommendation:
         """
         Classifies and recommends a single dish into GOOD, MEDIUM, or BAD.
         """
         dish_dict = self._to_dish_dict(dish)
 
+        # 1. Hard exclusions check (Immediate BAD)
+        full_text = f"{dish_dict.get('name', '')} {dish_dict.get('description', '')} {' '.join(dish_dict.get('tags', []))}"
+        hard_violation = self.check_hard_exclusions(full_text)
+        if hard_violation:
+            return TieredFoodRecommendation(
+                dish_name=dish_dict.get("name", "Unknown Item"),
+                tier=hard_violation["tier"],
+                fit_score=hard_violation["fit_score"],
+                summary_reason=hard_violation["summary_reason"],
+                matched_food_groups=hard_violation["matched_food_groups"],
+                green_flags=hard_violation["green_flags"],
+                red_flags=hard_violation["red_flags"],
+                allergen_warnings=hard_violation["allergen_warnings"],
+                customization_tips=hard_violation["customization_tips"],
+                price=dish_dict.get("price", ""),
+            )
+
+        # 2. AI evaluation if available
         if self.is_available():
             try:
                 results = self._recommend_batch_ai([dish_dict])
                 if results:
                     return results[0]
             except Exception as e:
-                print(f"[TieredFoodRecommender] AI evaluation failed ({e}), falling back to deterministic tier engine.")
+                logger.warning("[TieredFoodRecommender] AI evaluation failed (%s), falling back to deterministic engine.", e)
 
+        # 3. Deterministic scoring
         return self._recommend_dish_deterministic(dish_dict)
 
     def recommend_menu(
@@ -320,25 +407,38 @@ class TieredFoodRecommender:
             try:
                 recommendations = self._recommend_batch_ai(dishes)
             except Exception as e:
-                print(f"[TieredFoodRecommender] Batch AI failed ({e}), using deterministic tier engine.")
+                logger.warning("[TieredFoodRecommender] Batch AI failed (%s), using deterministic engine.", e)
                 recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
         else:
             recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
 
-        # Sort all recommendations by fit_score descending
-        recommendations.sort(key=lambda x: x.fit_score, reverse=True)
+        # Post-check: Double ensure hard safety constraints across ALL recommendations
+        validated_recs: List[TieredFoodRecommendation] = []
+        for rec in recommendations:
+            full_text = f"{rec.dish_name} {' '.join(rec.matched_food_groups)}"
+            violation = self.check_hard_exclusions(full_text)
+            if violation:
+                rec.tier = FoodTier.BAD
+                rec.fit_score = 0
+                rec.summary_reason = violation["summary_reason"]
+                rec.allergen_warnings = list(set(rec.allergen_warnings + violation["allergen_warnings"]))
+                rec.red_flags = list(set(rec.red_flags + violation["red_flags"]))
+            validated_recs.append(rec)
 
-        good_items = [r for r in recommendations if r.tier == FoodTier.GOOD]
-        medium_items = [r for r in recommendations if r.tier == FoodTier.MEDIUM]
-        bad_items = [r for r in recommendations if r.tier == FoodTier.BAD]
+        # Sort all recommendations by fit_score descending
+        validated_recs.sort(key=lambda x: x.fit_score, reverse=True)
+
+        good_items = [r for r in validated_recs if r.tier == FoodTier.GOOD]
+        medium_items = [r for r in validated_recs if r.tier == FoodTier.MEDIUM]
+        bad_items = [r for r in validated_recs if r.tier == FoodTier.BAD]
 
         return TieredRecommendationResult(
             user_summary=self.user_summary,
-            total_items_evaluated=len(recommendations),
+            total_items_evaluated=len(validated_recs),
             good_items=good_items,
             medium_items=medium_items,
             bad_items=bad_items,
-            all_recommendations=recommendations,
+            all_recommendations=validated_recs,
         )
 
     def _to_dish_dict(self, dish: Union[MenuItem, Dict[str, Any], str]) -> Dict[str, Any]:
@@ -426,77 +526,54 @@ Return ONLY a valid JSON array of objects matching this schema:
   }}
 ]
 """
-
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.1,
-            }
-        }
-        headers = {"Content-Type": "application/json"}
-        models_to_try = [self.model_name] if self.model_name else self.CANDIDATE_MODELS
-
-        last_error = None
-        response_json = None
-
-        for model in models_to_try:
-            if not model:
-                continue
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
-            try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                if resp.status_code == 200:
-                    result = resp.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        content = candidates[0].get("content", {}).get("parts", [])
-                        if content and "text" in content[0]:
-                            response_json = json.loads(content[0]["text"])
-                            break
-                elif resp.status_code == 404:
-                    last_error = f"Model '{model}' not found."
-                    continue
-                else:
-                    last_error = f"API Error {resp.status_code}: {resp.text}"
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if response_json is None:
-            raise RuntimeError(f"Gemini tier recommendation failed: {last_error}")
+        response_json = self.gemini_client.generate_json(prompt, temperature=0.1)
 
         if isinstance(response_json, dict) and "recommendations" in response_json:
             response_json = response_json["recommendations"]
         elif isinstance(response_json, dict) and "dishes" in response_json:
             response_json = response_json["dishes"]
+        elif not isinstance(response_json, list):
+            raise GeminiAPIError("Expected JSON array of recommendations.")
 
-        # Map to original dishes for prices
         dish_price_map = {d.get("name", "").lower(): d.get("price", "") for d in dishes}
 
         results: List[TieredFoodRecommendation] = []
         for d in response_json:
             name = d.get("dish_name", "Unknown Dish")
             raw_tier = str(d.get("tier", "MEDIUM")).upper()
-            tier = FoodTier.GOOD if "GOOD" in raw_tier else (FoodTier.BAD if "BAD" in raw_tier else FoodTier.MEDIUM)
             score = int(d.get("fit_score", 50))
 
-            # Guardrail consistency
-            if tier == FoodTier.BAD and score >= self.good_threshold:
-                tier = FoodTier.GOOD
-            elif tier == FoodTier.GOOD and score < self.bad_threshold:
+            # Safety enforcement
+            full_dish_text = f"{name} {json.dumps(d.get('matched_food_groups', []))}"
+            violation = self.check_hard_exclusions(full_dish_text)
+
+            if violation:
                 tier = FoodTier.BAD
+                score = 0
+                summary = violation["summary_reason"]
+                warnings = violation["allergen_warnings"]
+                reds = violation["red_flags"]
+            else:
+                if score >= self.good_threshold:
+                    tier = FoodTier.GOOD
+                elif score >= self.bad_threshold:
+                    tier = FoodTier.MEDIUM
+                else:
+                    tier = FoodTier.BAD
+                summary = d.get("summary_reason", "Classified based on nutritional matrix.")
+                warnings = d.get("allergen_warnings", [])
+                reds = d.get("red_flags", [])
 
             results.append(
                 TieredFoodRecommendation(
                     dish_name=name,
                     tier=tier,
                     fit_score=score,
-                    summary_reason=d.get("summary_reason", "Classified based on nutritional profile."),
+                    summary_reason=summary,
                     matched_food_groups=d.get("matched_food_groups", []),
                     green_flags=d.get("green_flags", []),
-                    red_flags=d.get("red_flags", []),
-                    allergen_warnings=d.get("allergen_warnings", []),
+                    red_flags=reds,
+                    allergen_warnings=warnings,
                     customization_tips=d.get("customization_tips"),
                     estimated_calories=d.get("estimated_calories"),
                     estimated_protein_g=d.get("estimated_protein_g"),
@@ -518,54 +595,27 @@ Return ONLY a valid JSON array of objects matching this schema:
 
         full_text = f"{name} {desc} {' '.join(tags)}".lower()
 
+        # 1. HARD EXCLUSION & ALLERGY AUDIT (Instant BAD Tier)
+        violation = self.check_hard_exclusions(full_text)
+        if violation:
+            return TieredFoodRecommendation(
+                dish_name=name,
+                tier=violation["tier"],
+                fit_score=violation["fit_score"],
+                summary_reason=violation["summary_reason"],
+                matched_food_groups=violation["matched_food_groups"],
+                green_flags=violation["green_flags"],
+                red_flags=violation["red_flags"],
+                allergen_warnings=violation["allergen_warnings"],
+                customization_tips=violation["customization_tips"],
+                price=price,
+            )
+
         score = 65  # Baseline neutral score
         greens: List[str] = []
         reds: List[str] = []
         allergen_alerts: List[str] = []
         matched_groups: List[str] = []
-
-        # 1. HARD EXCLUSION & ALLERGY AUDIT (Instant BAD Tier)
-        exclusions = [ex.lower() for ex in self.exclusions]
-        
-        # Check meat / poultry / fish / seafood exclusions & vegetarian/vegan diets
-        non_veg_keywords = ["chicken", "mutton", "beef", "pork", "fish", "prawn", "seafood", "meat", "bacon", "lamb", "egg", "shrimp", "squid", "duck", "poultry", "turkey", "crab", "lobster", "veal"]
-        meat_exclusions = {"meat", "poultry", "fish", "seafood", "pork", "beef", "non-veg", "non_veg", "vegetarian", "vegan"}
-        
-        if any(ex in meat_exclusions or "veg" in ex for ex in exclusions):
-            matched_meat = [k for k in non_veg_keywords if k in full_text]
-            if matched_meat:
-                return TieredFoodRecommendation(
-                    dish_name=name,
-                    tier=FoodTier.BAD,
-                    fit_score=0,
-                    summary_reason=f"Violates dietary restriction (contains non-vegetarian meat/poultry: {', '.join(matched_meat)}).",
-                    matched_food_groups=["Animal Meat"],
-                    green_flags=[],
-                    red_flags=[f"Contains non-vegetarian animal meat: {', '.join(matched_meat)}"],
-                    allergen_warnings=[f"Strict Dietary Violation: Non-vegetarian ({matched_meat[0]})"],
-                    customization_tips="Select a plant-based or dairy protein alternative.",
-                    price=price,
-                )
-
-        # Check explicit allergens & specific ingredients
-        for allergy in exclusions:
-            if allergy in meat_exclusions or "veg" in allergy:
-                continue
-            # Also handle single vs plural (e.g. peanut vs peanuts)
-            allergy_root = allergy.rstrip("s")
-            if allergy in full_text or (len(allergy_root) > 3 and allergy_root in full_text):
-                return TieredFoodRecommendation(
-                    dish_name=name,
-                    tier=FoodTier.BAD,
-                    fit_score=0,
-                    summary_reason=f"Strictly forbidden: contains declared allergen '{allergy}'.",
-                    matched_food_groups=[f"Allergen: {allergy}"],
-                    green_flags=[],
-                    red_flags=[f"Critical allergen detected: {allergy}"],
-                    allergen_warnings=[f"Contains allergen: {allergy}"],
-                    customization_tips="Request completely separate allergen-free preparation or select a different dish.",
-                    price=price,
-                )
 
         # Check digestive triggers
         for trigger in self.digestive_triggers:
@@ -575,13 +625,13 @@ Return ONLY a valid JSON array of objects matching this schema:
 
         # 2. FOOD GROUP SCORING & HEALTH ENHANCERS
         # Leafy greens / cruciferous / fresh veg
-        if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber", "methi", "saag", "cabbage", "kale", "lettuce", "veggie", "vegetable"]):
+        if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber", "methi", "saag", "cabbage", "kale", "lettuce", "veggie", "vegetable", "asparagus"]):
             score += 15
             greens.append("High in dietary fiber, micronutrients, and antioxidants")
             matched_groups.append("Cruciferous & Leafy Vegetables")
 
         # Lean / Healthy Protein
-        if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "chickpea", "paneer", "sprouts", "edamame", "grilled chicken", "fish tikka"]):
+        if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "chickpea", "paneer", "sprouts", "edamame", "grilled chicken", "fish tikka", "salmon"]):
             score += 12
             greens.append("High protein density supporting metabolic targets")
             matched_groups.append("Plant / Lean Protein")
@@ -605,27 +655,27 @@ Return ONLY a valid JSON array of objects matching this schema:
 
         # 3. CLINICAL RISK PENALTIES
         # Deep fried / high oxidation
-        if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa", "poori", "bhatura", "fritters", "tempura", "deep fry"]):
+        if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa", "poori", "bhatura", "fritters", "tempura", "deep fry", "calamari"]):
             score -= 25
             reds.append("Deep-fried; high oxidized lipids and caloric density")
             matched_groups.append("Deep Fried Foods")
 
         # Saturated fat / Cream / Butter
-        if any(w in full_text for w in ["makhani", "butter", "cream", "creamy", "malai", "cheesy", "mayo", "loaded cheese", "ghee loaded"]):
+        if any(w in full_text for w in ["makhani", "butter", "cream", "creamy", "malai", "cheesy", "mayo", "loaded cheese", "ghee loaded", "bacon"]):
             penalty = 20 if self.sat_fat_max_pct < 0.08 else 12
             score -= penalty
             reds.append("High saturated fat load exceeding cardiovascular guardrails")
             matched_groups.append("Saturated & Trans Fats")
 
         # Refined carbohydrates / High Glycemic
-        if any(w in full_text for w in ["naan", "kulcha", "maida", "white bread", "refined flour", "white rice", "bhature"]):
+        if any(w in full_text for w in ["naan", "kulcha", "maida", "white bread", "refined flour", "white rice", "bhature", "fries", "french fries"]):
             penalty = 20 if self.glycemic_sensitivity > 0.6 else 10
             score -= penalty
-            reds.append("High glycemic refined flour with rapid glucose spike risk")
+            reds.append("High glycemic refined carbohydrates with rapid glucose spike risk")
             matched_groups.append("Refined Carbohydrates")
 
         # Added sugar / desserts / syrups
-        if any(w in full_text for w in ["gulab jamun", "halwa", "syrup", "kheer", "sweet", "sugar", "caramel", "soda", "pastry", "ice cream"]):
+        if any(w in full_text for w in ["gulab jamun", "halwa", "syrup", "kheer", "sweet", "sugar", "caramel", "soda", "pastry", "ice cream", "lava cake", "chocolate cake"]):
             penalty = 30 if self.glycemic_sensitivity > 0.5 else 18
             score -= penalty
             reds.append("Concentrated simple sugars conflicting with metabolic targets")
@@ -648,7 +698,7 @@ Return ONLY a valid JSON array of objects matching this schema:
         elif score >= self.bad_threshold:
             tier = FoodTier.MEDIUM
             summary = "Moderate fit. Recommended in controlled portions or with minor customization."
-            customization = "Ask for light oil/butter, and pair with steamed vegetables or whole grain roti."
+            customization = "Ask for light oil/butter, and pair with steamed vegetables or whole grain flatbread."
         else:
             tier = FoodTier.BAD
             summary = "Not recommended due to high refined carbs, saturated fat, or sodium load."

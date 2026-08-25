@@ -5,12 +5,12 @@ into a comprehensive metabolic matrix, clinical guardrails, and scored food grou
 """
 
 from typing import List, Dict, Any, Optional, Union
-import os
-import re
 import json
+import logging
 from pathlib import Path
-import requests
 
+from .config import get_gemini_api_key, get_gemini_model_name
+from .gemini_client import GeminiClient, GeminiAPIError
 from .user_models import (
     UserProfile,
     MacroSplit,
@@ -20,45 +20,23 @@ from .user_models import (
     NutritionalMatrixProfile,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AINutritionProfiler:
     """Intelligent clinical & nutritional matrix generator powered by Gemini AI."""
 
-    CANDIDATE_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-    ]
-
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or self._load_api_key()
-        self.model_name = model_name or "gemini-3.6-flash"
-
-    def _load_api_key(self) -> Optional[str]:
-        """Loads API key from environment variable or .env file."""
-        if "GEMINI_API_KEY" in os.environ and os.environ["GEMINI_API_KEY"].strip():
-            return os.environ["GEMINI_API_KEY"].strip()
-
-        current = Path.cwd()
-        for path in [current / ".env", current.parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
-                                key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                if key:
-                                    os.environ["GEMINI_API_KEY"] = key
-                                    return key
-                except Exception:
-                    pass
-        return None
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        gemini_client: Optional[GeminiClient] = None,
+    ):
+        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
 
     def is_available(self) -> bool:
         """Returns True if a valid Gemini API key is configured."""
-        return bool(self.api_key and self.api_key.strip())
+        return self.gemini_client.is_available()
 
     def generate_matrix(self, user_input: Union[UserProfile, str, Dict[str, Any]]) -> NutritionalMatrixProfile:
         """
@@ -78,7 +56,7 @@ class AINutritionProfiler:
             try:
                 return self._generate_ai_matrix(profile)
             except Exception as e:
-                print(f"[AINutritionProfiler] Gemini AI call failed ({e}), falling back to deterministic baseline calculator.")
+                logger.warning("[AINutritionProfiler] Gemini AI call failed (%s), falling back to deterministic baseline calculator.", e)
                 return self._compute_deterministic_baseline(profile)
         else:
             return self._compute_deterministic_baseline(profile)
@@ -173,48 +151,8 @@ Return ONLY valid JSON matching this exact structure:
   "food_groups_to_limit": ["Refined Carbohydrates", "Deep-Fried Foods", "High-Sodium Sauces"]
 }}
 """
-
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.2
-            }
-        }
-
-        headers = {"Content-Type": "application/json"}
-        models_to_try = [self.model_name] if self.model_name else self.CANDIDATE_MODELS
-        
-        last_error = None
-        response_json = None
-
-        for model in models_to_try:
-            if not model:
-                continue
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
-            try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=25)
-                if resp.status_code == 200:
-                    result = resp.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        content = candidates[0].get("content", {}).get("parts", [])
-                        if content and "text" in content[0]:
-                            response_json = json.loads(content[0]["text"])
-                            break
-                elif resp.status_code == 404:
-                    last_error = f"Model '{model}' not found on endpoint."
-                    continue
-                else:
-                    last_error = f"API Error {resp.status_code}: {resp.text}"
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if response_json is None:
-            raise RuntimeError(f"Gemini AI matrix generation failed: {last_error}")
-
-        return self._parse_matrix_json(response_json, model_name=model)
+        response_json = self.gemini_client.generate_json(prompt, temperature=0.2)
+        return self._parse_matrix_json(response_json, model_name=self.gemini_client.model_name)
 
     def _parse_matrix_json(self, data: Dict[str, Any], model_name: str = "Gemini-Flash") -> NutritionalMatrixProfile:
         """Converts raw JSON dictionary into strongly-typed NutritionalMatrixProfile."""
@@ -283,9 +221,9 @@ Return ONLY valid JSON matching this exact structure:
         clinical guardrails when offline or if AI is unconfigured.
         """
         # Default biometrics if missing
-        weight = profile.weight_kg or 70.0
-        height = profile.height_cm or 170.0
-        age = profile.age or 30
+        weight = max(25.0, min(300.0, profile.weight_kg or 70.0))
+        height = max(80.0, min(250.0, profile.height_cm or 170.0))
+        age = max(10, min(120, profile.age or 30))
         gender = (profile.gender or "male").lower()
 
         # 1. Mifflin-St Jeor BMR
@@ -315,18 +253,15 @@ Return ONLY valid JSON matching this exact structure:
         target_calories = tdee * (1.0 + adj_pct / 100.0)
 
         # 4. Macros
-        # Protein: 1.8g/kg for deficit/muscle, 1.2g/kg maintenance
         protein_per_kg = 1.8 if adj_pct != 0 else 1.2
         protein_g = weight * protein_per_kg
         protein_kcal = protein_g * 4.0
         protein_pct = min(40.0, (protein_kcal / target_calories) * 100.0)
 
-        # Fat: 25% of calories
         fat_pct = 25.0
         fat_kcal = target_calories * (fat_pct / 100.0)
         fat_g = fat_kcal / 9.0
 
-        # Carbs: Remaining
         carbs_kcal = target_calories - protein_kcal - fat_kcal
         carbs_g = max(50.0, carbs_kcal / 4.0)
         carbs_pct = (carbs_kcal / target_calories) * 100.0
@@ -355,9 +290,9 @@ Return ONLY valid JSON matching this exact structure:
         diets = [d.lower() for d in profile.dietary_preferences]
         allergies = [a.lower() for a in profile.allergies]
 
-        glycemic_idx = 0.85 if any(c in conds for c in ["diabetes", "type_2_diabetes", "pcos", "insulin_resistance"]) else 0.4
+        glycemic_idx = 0.85 if any(c in conds for c in ["diabetes", "type_2_diabetes", "pcos", "insulin_resistance", "pre_diabetes"]) else 0.4
         sodium_limit = 1500 if any(c in conds for c in ["hypertension", "high_bp", "heart_disease"]) else 2300
-        sat_fat_pct = 0.06 if any(c in conds for c in ["cholesterol", "hyperlipidemia", "heart_disease"]) else 0.09
+        sat_fat_pct = 0.06 if any(c in conds for c in ["cholesterol", "hyperlipidemia", "heart_disease", "fatty_liver"]) else 0.09
         fiber_min = 35.0 if glycemic_idx > 0.6 else 28.0
 
         guardrails_obj = ClinicalGuardrailMatrix(
@@ -394,7 +329,7 @@ Return ONLY valid JSON matching this exact structure:
             metabolic_matrix=metabolic_obj,
             clinical_guardrails=guardrails_obj,
             food_group_affinities=affinities,
-            excluded_allergens_and_restrictions=profile.allergies + profile.dietary_preferences,
+            excluded_allergens_and_restrictions=list(set(profile.allergies + profile.dietary_preferences)),
             top_recommended_food_groups=[fg.food_group for fg in affinities if fg.score >= 7],
             food_groups_to_limit=[fg.food_group for fg in affinities if fg.score <= -5],
             metadata={"engine": "Deterministic-Baseline-Calculator"}
