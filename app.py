@@ -1,9 +1,9 @@
 """
-Streamlit Web UI for the NutriMenu AI — 3-Tier Nutrition Recommendation System.
-Integrates:
-- Model 1: Menu Image OCR & Food Item Extraction
-- Model 2: Personalized User Health & Nutritional Matrix Generator
-- Model 3: 3-Tier Food Recommendation Engine (🟢 GOOD, 🟡 MEDIUM, 🔴 BAD)
+Streamlit Web Application for NutriMenu AI.
+Features a modern 3-Step Guided Wizard:
+- Step 1: 📷 Upload & Scan Restaurant Menu (Deep OCR)
+- Step 2: 👤 User Health Profile & Live Nutritional Matrix Studio
+- Step 3: 🍽️ Beautified 3-Tier Food Matchmaker Dashboard
 """
 
 import sys
@@ -17,87 +17,36 @@ root_dir = Path(__file__).resolve().parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
-from src.models import MenuItem, MenuSection, RecognizedMenu
 from src.matrix_generator import AIMatrixGenerator, UserNutritionalMatrix
 from src.pipeline import MenuRecognitionPipeline
 from src.recommendation_engine import (
     TieredFoodRecommender,
     TieredRecommendationResult,
-    TieredFoodRecommendation,
-    FoodTier,
 )
 from src.config import DEFAULT_GOOD_THRESHOLD, DEFAULT_BAD_THRESHOLD
 from src.ui_components import (
-    render_sidebar_profile,
-    render_user_matrix_card,
-    render_menu_input_section,
-    render_recommendation_dashboard,
+    get_custom_css,
+    render_stepper,
+    render_step1_menu_upload,
+    render_step2_health_matrix,
+    render_step3_recommendations,
     render_medical_disclaimer,
 )
 
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="NutriMenu AI | 3-Tier Food Recommender",
+    page_title="NutriMenu AI | Personalized Food Recommender",
     page_icon="🥗",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# Custom Styling (adaptive for both Light and Dark Streamlit themes)
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin-bottom: 0.2rem;
-    }
-    .sub-header {
-        font-size: 1.05rem;
-        opacity: 0.85;
-        margin-bottom: 1.5rem;
-    }
-    .tier-card-good {
-        background: rgba(22, 163, 74, 0.08);
-        border: 1.5px solid #16A34A;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 14px;
-    }
-    .tier-card-medium {
-        background: rgba(202, 138, 4, 0.08);
-        border: 1.5px solid #CA8A04;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 14px;
-    }
-    .tier-card-bad {
-        background: rgba(220, 38, 38, 0.08);
-        border: 1.5px solid #DC2626;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 14px;
-    }
-    .kpi-good {
-        font-size: 1.6rem;
-        font-weight: bold;
-        color: #16A34A;
-    }
-    .kpi-medium {
-        font-size: 1.6rem;
-        font-weight: bold;
-        color: #CA8A04;
-    }
-    .kpi-bad {
-        font-size: 1.6rem;
-        font-weight: bold;
-        color: #DC2626;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Apply Ultra-Modern Design System CSS
+st.markdown(get_custom_css(), unsafe_allow_html=True)
 
 
-# --- Cached Singletons ---
+# --- Cached Engine Singletons ---
 @st.cache_resource
 def get_matrix_generator():
     return AIMatrixGenerator()
@@ -108,93 +57,106 @@ def get_ocr_pipeline():
     return MenuRecognitionPipeline()
 
 
-# --- SIDEBAR: User Health Matrix (Model 2) ---
-user_payload, gen_matrix_btn = render_sidebar_profile()
+# --- Session State Initialization ---
+if "wizard_step" not in st.session_state:
+    st.session_state["wizard_step"] = 1
 
-# Profile state tracking: compute or refresh matrix when profile changes
-profile_signature = str(user_payload)
-if "last_profile_signature" not in st.session_state or st.session_state["last_profile_signature"] != profile_signature or gen_matrix_btn:
-    st.session_state["last_profile_signature"] = profile_signature
-    with st.spinner("Calculating metabolic matrix & clinical guardrails..."):
-        try:
-            generator = get_matrix_generator()
-            st.session_state["user_matrix"] = generator.generate(user_payload, user_id="active_user")
-            # Invalidate old recommendations on profile change
-            if "last_recommendation_result" in st.session_state:
-                del st.session_state["last_recommendation_result"]
-        except Exception as e:
-            st.error(f"Failed to generate user nutritional matrix: {e}")
+if "dishes_to_evaluate" not in st.session_state:
+    st.session_state["dishes_to_evaluate"] = []
 
-user_matrix: Optional[UserNutritionalMatrix] = st.session_state.get("user_matrix")
+if "user_matrix" not in st.session_state:
+    st.session_state["user_matrix"] = None
 
-# Display User Matrix Summary Card
-if user_matrix:
-    render_user_matrix_card(user_matrix)
+if "eval_result" not in st.session_state:
+    st.session_state["eval_result"] = None
 
-# --- MAIN CONTENT AREA ---
-st.markdown('<div class="main-header">🥗 NutriMenu AI: 3-Tier Recommendation Engine</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Bridges restaurant menu items with personalized clinical health matrices to classify dishes into 🟢 <b>Good</b>, 🟡 <b>Medium</b>, and 🔴 <b>Bad</b> tiers.</div>', unsafe_allow_html=True)
 
-# Step 1: Input Food / Menu (Model 1) - Defaults to Upload Tab
-dishes_to_evaluate, current_source_id = render_menu_input_section(get_ocr_pipeline)
+# --- Navigation Stepper Bar ---
+current_step = st.session_state["wizard_step"]
+render_stepper(current_step)
 
-# Invalidate stale recommendation if menu source changed
-if "last_menu_source_id" not in st.session_state:
-    st.session_state["last_menu_source_id"] = current_source_id
-elif st.session_state["last_menu_source_id"] != current_source_id:
-    st.session_state["last_menu_source_id"] = current_source_id
-    if "last_recommendation_result" in st.session_state:
-        del st.session_state["last_recommendation_result"]
 
-# Step 2: Middle Model Evaluation
-st.markdown("---")
-st.markdown("### 2. Configure Recommendation Thresholds & Run Matchmaker")
+# =========================================================================
+# STEP 1: Upload & Scan Menu
+# =========================================================================
+if current_step == 1:
+    dishes, source_id, can_proceed = render_step1_menu_upload(get_ocr_pipeline)
+    
+    if dishes:
+        st.session_state["dishes_to_evaluate"] = dishes
 
-eval_col1, eval_col2 = st.columns([2, 1])
-with eval_col1:
-    good_threshold = st.slider(
-        "Tier 1 (GOOD) Fit Score Threshold",
-        min_value=50,
-        max_value=95,
-        value=DEFAULT_GOOD_THRESHOLD,
-        step=5,
-        key="slider_good_threshold"
-    )
-with eval_col2:
-    bad_ceiling = min(good_threshold - 5, 70)
-    bad_threshold = st.slider(
-        "Tier 3 (BAD) Fit Score Ceiling",
-        min_value=20,
-        max_value=bad_ceiling,
-        value=min(DEFAULT_BAD_THRESHOLD, bad_ceiling),
-        step=5,
-        key="slider_bad_threshold"
-    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if st.button(
+            "➡️ Next: Configure Health Matrix & Biometrics",
+            type="primary",
+            use_container_width=True,
+            disabled=not (bool(st.session_state["dishes_to_evaluate"])),
+            key="btn_next_to_step2",
+        ):
+            st.session_state["wizard_step"] = 2
+            st.rerun()
 
-run_eval_btn = st.button("🚀 Evaluate Menu & Classify 3 Tiers", type="primary", use_container_width=True, key="btn_run_eval")
 
-if run_eval_btn:
-    if not dishes_to_evaluate:
-        st.warning("Please upload a menu image or enter dishes above before running evaluation.")
-    elif not user_matrix:
-        st.error("User Health Matrix is missing. Please configure your profile in the sidebar.")
-    else:
-        with st.spinner("Analyzing food groups and safety guardrails against health matrix..."):
-            try:
+# =========================================================================
+# STEP 2: Health Profile & Nutritional Matrix Studio
+# =========================================================================
+elif current_step == 2:
+    user_matrix, can_proceed_matrix = render_step2_health_matrix(get_matrix_generator)
+    st.session_state["user_matrix"] = user_matrix
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 2])
+    with nav_col1:
+        if st.button("⬅️ Back to Menu", use_container_width=True, key="btn_back_to_step1"):
+            st.session_state["wizard_step"] = 1
+            st.rerun()
+
+    with nav_col3:
+        if st.button(
+            "🚀 Run 3-Tier Matchmaker & Generate Recommendations ➔",
+            type="primary",
+            use_container_width=True,
+            key="btn_run_step3_eval",
+        ):
+            with st.spinner("Analyzing menu items against metabolic targets and clinical guardrails..."):
                 recommender = TieredFoodRecommender(
                     user_matrix=user_matrix,
-                    good_threshold=good_threshold,
-                    bad_threshold=bad_threshold,
+                    good_threshold=DEFAULT_GOOD_THRESHOLD,
+                    bad_threshold=DEFAULT_BAD_THRESHOLD,
                 )
-                eval_result = recommender.recommend_menu(dishes_to_evaluate)
-                st.session_state["last_recommendation_result"] = eval_result
-            except Exception as e:
-                st.error(f"Error during recommendation evaluation: {e}")
+                eval_result = recommender.recommend_menu(st.session_state["dishes_to_evaluate"])
+                st.session_state["eval_result"] = eval_result
+                st.session_state["wizard_step"] = 3
+                st.rerun()
 
-result: Optional[TieredRecommendationResult] = st.session_state.get("last_recommendation_result")
 
-if result:
-    render_recommendation_dashboard(result)
+# =========================================================================
+# STEP 3: 3-Tier Recommendations Dashboard
+# =========================================================================
+elif current_step == 3:
+    eval_result: Optional[TieredRecommendationResult] = st.session_state.get("eval_result")
+    
+    if eval_result:
+        render_step3_recommendations(eval_result)
+    else:
+        st.warning("No recommendation results available. Please run evaluation from Step 2.")
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    c_back1, c_back2, c_spacer = st.columns([1, 1, 2])
+    with c_back1:
+        if st.button("⬅️ Edit Health Matrix", use_container_width=True, key="btn_back_step2_from_step3"):
+            st.session_state["wizard_step"] = 2
+            st.rerun()
+    with c_back2:
+        if st.button("🔄 Scan Another Menu", use_container_width=True, key="btn_restart_wizard"):
+            st.session_state["wizard_step"] = 1
+            st.session_state["dishes_to_evaluate"] = []
+            st.session_state["eval_result"] = None
+            st.rerun()
+
+
+# --- Global Medical Notice Footer ---
 st.markdown("---")
 render_medical_disclaimer()
