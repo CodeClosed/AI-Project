@@ -124,32 +124,30 @@ export default function App() {
             </div>
           </div>
 
-          {/* Account Profile Avatar Circle & Status Chip */}
-          <div className="flex items-center gap-3">
-            {/* Quick Profile Summary Badge */}
-            <button
-              onClick={() => setIsAccountModalOpen(true)}
-              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-slate-100 transition-all text-xs font-semibold text-slate-700 cursor-pointer active:scale-[0.96]"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>{dietLabels || 'Standard'}</span>
-              {allergyLabels && (
-                <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold">
-                  {allergyLabels}
-                </span>
-              )}
-            </button>
-
-            {/* Account Avatar Circle Button */}
-            <button
-              onClick={() => setIsAccountModalOpen(true)}
-              title="Open Account & Health Matrix Settings"
-              className="relative w-10 h-10 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center shadow-sm hover:ring-2 hover:ring-emerald-500 hover:ring-offset-2 transition-all active:scale-[0.96] cursor-pointer"
-            >
-              <User className="w-5 h-5" />
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />
-            </button>
-          </div>
+          {/* Unified Single Account Profile Button */}
+          <button
+            onClick={() => setIsAccountModalOpen(true)}
+            title="Open Account & Health Matrix Settings"
+            className="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-slate-100/80 transition-all text-xs font-semibold text-slate-800 shadow-xs active:scale-[0.96] cursor-pointer group"
+          >
+            <div className="relative w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+              <User className="w-4 h-4" />
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full" />
+            </div>
+            <div className="text-left leading-tight hidden sm:block">
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <span>{dietLabels || 'Standard'}</span>
+                {allergyLabels && (
+                  <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold">
+                    {allergyLabels}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-slate-500 font-medium">
+                {userMatrix?.metabolic_targets ? `${Math.round(userMatrix.metabolic_targets.target_calories_kcal)} kcal • Edit Profile` : 'Click to setup profile'}
+              </div>
+            </div>
+          </button>
         </div>
       </header>
 

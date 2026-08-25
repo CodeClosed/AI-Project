@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Image as ImageIcon, Trash2, Loader2, X } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, Trash2, Loader2, X, Plus } from 'lucide-react';
 import { uploadMenuImage } from '../api';
 
 export default function MenuUploadSection({
@@ -14,6 +14,7 @@ export default function MenuUploadSection({
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'manual'
+  const [customDishName, setCustomDishName] = useState('');
   const [manualText, setManualText] = useState(
     'Steamed Edamame | Fresh steamed soybeans with sea salt | $5.99\nGrilled Lemon Chicken | Herb grilled chicken breast with roasted broccoli | $14.50\nPalak Paneer with Whole Wheat Roti | Fresh spinach puree with cottage cheese | $13.50\nCrispy Deep Fried Mozzarella Sticks | Breaded cheese sticks fried with marinara | $7.99'
   );
@@ -71,6 +72,14 @@ export default function MenuUploadSection({
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleAddCustomDish = (e) => {
+    if (e) e.preventDefault();
+    const trimmed = customDishName.trim();
+    if (!trimmed) return;
+    setDishes([...dishes, { name: trimmed, description: '', price: '', tags: [], section: 'Custom' }]);
+    setCustomDishName('');
   };
 
   const handleParseManual = () => {
@@ -232,12 +241,30 @@ export default function MenuUploadSection({
               </span>
             </div>
 
+            {/* Quick Add Custom Item Bar */}
+            <form onSubmit={handleAddCustomDish} className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Type item name to add (e.g. Garlic Naan)..."
+                value={customDishName}
+                onChange={(e) => setCustomDishName(e.target.value)}
+                className="flex-1 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+              <button
+                type="submit"
+                disabled={!customDishName.trim()}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow-xs transition-all active:scale-[0.96] flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            </form>
+
             {/* Table Contents */}
             {dishes.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
                 <ImageIcon className="w-10 h-10 mb-2 opacity-30" />
                 <p className="text-xs font-medium text-slate-500">No menu dishes extracted yet.</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Upload a menu image on the left to populate this table.</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Upload a menu image on the left or add an item above.</p>
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto max-h-[320px] bg-white">
