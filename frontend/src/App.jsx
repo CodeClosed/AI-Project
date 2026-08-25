@@ -18,6 +18,86 @@ const DEFAULT_PROFILE = {
   raw_bio_text: '',
 };
 
+function computeLocalMatrix(p) {
+  const age = Number(p.age) || 30;
+  const gender = String(p.gender || 'male').toLowerCase();
+  const height = Number(p.height_cm) || 170;
+  const weight = Number(p.weight_kg) || 70;
+  const activity = String(p.activity_level || 'sedentary').toLowerCase();
+  const goal = String(p.primary_goal || 'maintenance').toLowerCase();
+
+  const s = gender === 'male' ? 5.0 : -161.0;
+  const bmr = 10.0 * weight + 6.25 * height - 5.0 * age + s;
+  const palMap = { sedentary: 1.2, light: 1.375, moderate: 1.55, heavy: 1.725, athlete: 1.9 };
+  const pal = palMap[activity] || 1.2;
+  const tdee = bmr * pal;
+
+  let adj = 0.0;
+  if (goal.includes('fat_loss') || goal.includes('deficit') || goal.includes('weight_loss')) {
+    adj = -0.20;
+  } else if (goal.includes('muscle') || goal.includes('gain') || goal.includes('surplus')) {
+    adj = 0.10;
+  }
+  const targetCalories = Math.max(1000, tdee * (1.0 + adj));
+  const pPerKg = adj !== 0.0 ? 1.8 : 1.2;
+  const pG = weight * pPerKg;
+  const pKcal = pG * 4.0;
+  const pPct = Math.min(60, (pKcal / targetCalories) * 100.0);
+  const fPct = 25.0;
+  const fKcal = targetCalories * (fPct / 100.0);
+  const fG = fKcal / 9.0;
+  const cKcal = Math.max(0, targetCalories - pKcal - fKcal);
+  const cG = Math.max(30.0, cKcal / 4.0);
+  const cPct = Math.max(15, 100.0 - pPct - fPct);
+
+  const hasDiabetes = (p.health_conditions || []).some(c => c.includes('diabet'));
+  const hasHTN = (p.health_conditions || []).includes('hypertension');
+
+  return {
+    user_id: 'active_user',
+    user_summary: `${age}yo ${gender}, ${goal.replace('_', ' ')} (${Math.round(targetCalories)} kcal/day)`,
+    metabolic_targets: {
+      bmr_kcal: Math.round(bmr),
+      tdee_kcal: Math.round(tdee),
+      target_calories_kcal: Math.round(targetCalories),
+      caloric_adjustment_ratio: adj,
+      target_protein_g: Math.round(pG),
+      target_protein_pct: Math.round(pPct),
+      target_carbs_g: Math.round(cG),
+      target_carbs_pct: Math.round(cPct),
+      target_fats_g: Math.round(fG),
+      target_fats_pct: Math.round(fPct),
+      protein_g_per_kg: pPerKg,
+      target_water_liters: 2.5,
+      strategy_summary: `Targeting ${Math.round(targetCalories)} kcal with ${Math.round(pG)}g protein.`,
+    },
+    clinical_risk_weights: {
+      glycemic_sensitivity: hasDiabetes ? 0.9 : 0.3,
+      cardiovascular_risk_weight: hasHTN ? 0.8 : 0.4,
+      lipid_optimization_weight: 0.5,
+      inflammation_index_weight: 0.4,
+      digestive_sensitivity_weight: (p.health_conditions || []).includes('gerd') ? 0.8 : 0.3,
+      satiety_demand_weight: 0.6,
+    },
+    nutritional_guardrails: {
+      sodium_ceiling_mg: hasHTN ? 1800 : 2300,
+      saturated_fat_max_pct: 0.08,
+      added_sugar_max_g: hasDiabetes ? 15.0 : 25.0,
+      dietary_fiber_min_g: 30.0,
+      potassium_target_mg: 3500,
+      omega3_min_g: 1.5,
+      digestive_triggers_to_avoid: (p.health_conditions || []).includes('gerd') ? ['deep_fried', 'excess_chili', 'citrus'] : [],
+      key_micronutrient_priorities: ['potassium', 'magnesium', 'vitamin_d'],
+    },
+    food_group_weights: {},
+    exclusion_mask: [
+      ...(p.dietary_preferences || []),
+      ...(p.allergies || []),
+    ],
+    metadata: { source: 'instant_local_reactive' },
+  };
+}
+
 export default function App() {
   // 1. Persistent User Account Profile
   const [profile, setProfile] = useState(() => {
@@ -29,7 +109,7 @@ export default function App() {
     }
   });
 
-  const [userMatrix, setUserMatrix] = useState(null);
+  const [userMatrix, setUserMatrix] = useState(() => computeLocalMatrix(profile));
   const [loadingMatrix, setLoadingMatrix] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
@@ -43,11 +123,12 @@ export default function App() {
   const [evalResult, setEvalResult] = useState(null);
   const [evalLoading, setEvalLoading] = useState(false);
 
-  // Sync profile to localStorage
+  // Sync profile to localStorage and immediately refresh local matrix
   useEffect(() => {
     try {
       localStorage.setItem('nutrimenu_account_profile', JSON.stringify(profile));
     } catch {}
+    setUserMatrix((prev) => prev || computeLocalMatrix(profile));
   }, [profile]);
 
   // Sync health matrix with backend
@@ -55,14 +136,18 @@ export default function App() {
     setLoadingMatrix(true);
     try {
       const data = await generateHealthMatrix(currentProfile);
-      setUserMatrix(data.matrix);
-      return data.matrix;
+      if (data?.matrix) {
+        setUserMatrix(data.matrix);
+        return data.matrix;
+      }
     } catch (err) {
-      console.error('Matrix generation failed:', err);
-      return null;
+      console.warn('Backend matrix generation fallback to local:', err);
     } finally {
       setLoadingMatrix(false);
     }
+    const fallback = computeLocalMatrix(currentProfile);
+    setUserMatrix(fallback);
+    return fallback;
   }, []);
 
   // Initial load
@@ -72,11 +157,20 @@ export default function App() {
 
   // Run Recommendation Matchmaker
   const runEvaluation = async (activeMatrix = userMatrix, activeDishes = dishes) => {
-    if (!activeMatrix || activeDishes.length === 0) return;
+    const matrixToUse = activeMatrix || computeLocalMatrix(profile);
+    if (!matrixToUse || activeDishes.length === 0) return;
     setEvalLoading(true);
     try {
-      const data = await evaluateRecommendations(activeMatrix, activeDishes);
-      setEvalResult(data.result);
+      const data = await evaluateRecommendations(
+        matrixToUse,
+        activeDishes,
+        75,
+        45,
+        profile?.api_key
+      );
+      if (data?.result) {
+        setEvalResult(data.result);
+      }
     } catch (err) {
       console.error('Recommendation evaluation failed:', err);
     } finally {
@@ -92,14 +186,15 @@ export default function App() {
     }
   };
 
-  // Auto-run evaluation when new dishes are extracted from image
+  // Auto-run evaluation when dishes or userMatrix are updated
   useEffect(() => {
-    if (userMatrix && dishes.length > 0) {
-      runEvaluation(userMatrix, dishes);
+    if (dishes.length > 0) {
+      const matrixToUse = userMatrix || computeLocalMatrix(profile);
+      runEvaluation(matrixToUse, dishes);
     } else {
       setEvalResult(null);
     }
-  }, [dishes]);
+  }, [dishes, userMatrix]);
 
   const dietLabels = (profile.dietary_preferences || []).join(', ');
   const allergyLabels = (profile.allergies || []).join(', ');

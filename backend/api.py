@@ -80,6 +80,7 @@ class RecommendationRequest(BaseModel):
     dishes: List[DishItem]
     good_threshold: int = DEFAULT_GOOD_THRESHOLD
     bad_threshold: int = DEFAULT_BAD_THRESHOLD
+    api_key: Optional[str] = None
 
 
 # --- API Routes ---
@@ -168,6 +169,7 @@ def evaluate_recommendations(req: RecommendationRequest):
 
         recommender = TieredFoodRecommender(
             user_matrix=user_matrix,
+            api_key=req.api_key,
             good_threshold=req.good_threshold,
             bad_threshold=req.bad_threshold,
         )

@@ -41,7 +41,7 @@ export async function generateHealthMatrix(profilePayload) {
   return await response.json();
 }
 
-export async function evaluateRecommendations(userMatrix, dishes, goodThreshold = 75, badThreshold = 45) {
+export async function evaluateRecommendations(userMatrix, dishes, goodThreshold = 75, badThreshold = 45, apiKey = null) {
   const response = await fetch(`${API_BASE_URL}/api/recommend/evaluate`, {
     method: 'POST',
     headers: {
@@ -52,6 +52,7 @@ export async function evaluateRecommendations(userMatrix, dishes, goodThreshold 
       dishes: dishes,
       good_threshold: goodThreshold,
       bad_threshold: badThreshold,
+      api_key: apiKey,
     }),
   });
 

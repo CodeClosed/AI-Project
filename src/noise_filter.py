@@ -36,7 +36,7 @@ class AdvancedNoiseFilter:
     BRANDING_REGEXES = [
         r"^\s*(?:fast\s*food(?:\s*menu)?|food\s*menu|restaurant(?:\s*menu)?|cafe\s*menu|hotel\s*menu|bar\s*menu)\s*$",
         r"^\s*(?:the\s*menu|daily\s*menu|our\s*menu|today['’]?s\s*menu|special\s*menu)\s*$",
-        r"^\s*(?:welcome|delicious|fresh\s*&?\s*tasty|authentic\s*taste|quality\s*food|best\s*taste)\s*$",
+        r"^\s*(?:welcome|delicious|fresh\s*&?\s*tasty|delicious\s*&?\s*tasty|authentic\s*taste|quality\s*food|best\s*taste)\s*$",
         r"^\s*(?:your\s*logo(?:\s*here)?|logo\s*here|company\s*name|tagline\s*here|brand\s*name)\s*$",
         r"\b(?:a\s+legend(?:\s*[:\-]\s*|\s+)since\b.*)",
         r"\b(?:since\s+\d{4})\b",

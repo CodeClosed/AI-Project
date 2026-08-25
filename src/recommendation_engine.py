@@ -174,15 +174,15 @@ class TieredFoodRecommender:
     """
 
     NON_VEG_KEYWORDS = [
-        "chicken", "mutton", "beef", "pork", "fish", "prawn", "prawns", "seafood", "meat",
-        "bacon", "lamb", "egg", "eggs", "shrimp", "shrimps", "squid", "duck", "poultry", "turkey",
+        "chicken", "mutton", "muttan", "mutan", "beef", "pork", "fish", "prawn", "prawns", "seafood", "meat",
+        "bacon", "lamb", "egg", "eggs", "exe", "egs", "shrimp", "shrimps", "squid", "duck", "poultry", "turkey",
         "crab", "crabs", "lobster", "veal", "ham", "prosciutto", "salmon", "tuna", "steak",
-        "calamari", "anchovy", "pepperoni", "salami"
+        "calamari", "anchovy", "pepperoni", "salami", "chioken", "chiken", "chikken", "gosht", "keema", "kheema"
     ]
 
     VEGAN_EXCLUSIONS = [
         "cheese", "paneer", "butter", "cream", "milk", "curd", "yogurt", "ghee",
-        "whey", "honey", "dairy", "mayo", "mayonnaise", "egg", "eggs", "omelette"
+        "whey", "honey", "dairy", "mayo", "mayonnaise", "egg", "eggs", "exe", "omelette"
     ]
 
     def __init__(
@@ -274,7 +274,8 @@ class TieredFoodRecommender:
                 meat = matched_non_veg[0].title()
                 
                 # Dish-Specific bespoke reason and substitution
-                if "biryani" in lower_text:
+                is_biryani = any(b in lower_text for b in ["biryani", "birvani", "blryani", "briyani", "biryany"])
+                if is_biryani:
                     if "family" in lower_text or "pack" in lower_text or "handi" in lower_text:
                         reason = f"Large sharing platter containing multiple portions of spiced {meat.lower()} and ghee-infused basmati rice, conflicting with vegetarian diet."
                         tip = "Substitute with a Family Soya Dum Biryani Feast or Paneer Tikka Biryani Handi with cooling cucumber raita."
@@ -652,6 +653,10 @@ Return ONLY valid JSON matching this schema:
         customization = ""
 
         # Specific Dish Heuristics
+        is_biryani = any(b in full_text for b in ["biryani", "birvani", "blryani", "briyani", "biryany"])
+        is_manchurian = any(m in full_text for m in ["manchurian", "manchurlan", "manchuria"])
+        is_family_pack = any(fp in full_text for fp in ["family pack", "supreme pack", "combo pack", "platter", "feast", "jumbo"])
+
         if "butter chicken" in full_text or "makhani" in full_text:
             score = 42
             matched_groups = ["Poultry Protein", "Dairy Fats & Cream", "Tomato Gravy"]
@@ -659,6 +664,34 @@ Return ONLY valid JSON matching this schema:
             reds = ["High saturated fat load from heavy butter and cashew-cream emulsion", "Elevated sodium in restaurant curry base"]
             summary = "Provides rich protein density from chicken breast, but the heavy dairy butter and cashew gravy carries a significant saturated fat and caloric density penalty."
             customization = "Ask the kitchen for light gravy, substitute half the heavy cream with whisked dahi, or pair with steamed whole wheat roti rather than butter naan."
+        elif is_family_pack and is_biryani:
+            score = 58
+            matched_groups = ["Whole Spices & Herbs", "High-Volume Basmati Rice", "Portion Multiplier"]
+            greens = ["Aromatic whole spices (cardamom, clove, cinnamon) provide antioxidant bioflavonoids", "Conforms to vegetarian protocol if plant-based"]
+            reds = ["Extremely large portion size carries high risk of caloric and glycemic overshoot", "High cooking fat and ghee infusion"]
+            summary = "Multi-serving sharing platter of seasoned basmati rice. While suitable for group dining, individual serving control is critical to manage carbohydrate density."
+            customization = "Divide into measured individual portions (~1.5 cups per serving) and pair with generous cucumber raita and raw onion salad."
+        elif is_family_pack:
+            score = 60
+            matched_groups = ["Multi-Serving Platter", "Mixed Cuisine"]
+            greens = ["Diverse assortment of meal components for balanced sharing"]
+            reds = ["High cumulative caloric and sodium content across full multi-item pack"]
+            summary = "Large-format multi-item sharing package. Contains high cumulative sodium and fat density across combined preparations."
+            customization = "Share among 3-4 persons, prioritize salad and tandoori components, and request gravies with reduced butter."
+        elif is_biryani and any(v in full_text for v in ["veg", "vcg", "subz", "vegetable", "paneer", "soya", "kathal", "jackfruit"]):
+            score = 70
+            matched_groups = ["Vegetable Fiber", "Basmati Grains", "Aromatic Spices"]
+            greens = ["Rich in plant-based micronutrients, carrot beta-carotene, and bean fiber", "Potent polyphenol antioxidant blend from cloves, saffron, and star anise", "Strictly vegetarian-compliant"]
+            reds = ["Starch-dense basmati rice carries high glycemic load", "Restaurant preparation typically includes generous ghee or refined oil"]
+            summary = "Fragrant vegetarian rice preparation cooked with seasonal vegetables and whole spices. Offers fiber and phytonutrients, though mindful portioning is recommended for blood glucose management."
+            customization = "Pair with double cucumber-mint raita to slow gastric emptying, or request preparation with minimal oil."
+        elif is_manchurian:
+            score = 55
+            matched_groups = ["Deep Fried Dumplings", "Soy-Garlic Sauce", "Refined Starch"]
+            greens = ["Minced vegetable content (cabbage, carrots, bell peppers)", "Allicin and capsaicin from garlic and chili aromatics"]
+            reds = ["Dumplings are deep-fried in thermal cooking oils", "Cornstarch thickener and soy sauce contribute to high sodium and glycemic index"]
+            summary = "Indo-Chinese spiced vegetable florets or dumplings deep-fried and tossed in a cornstarch-thickened soy sauce. Elevated sodium and oxidized lipid load warrant moderate consumption."
+            customization = "Request gravy prepared with low sodium, ask for stir-fried rather than deep-fried florets, or pair with steamed brown rice."
         elif "tandoori roti" in full_text:
             score = 80
             matched_groups = ["Whole Grains & Millets", "Low-Fat Bread"]
@@ -673,12 +706,12 @@ Return ONLY valid JSON matching this schema:
             reds = ["Made primarily with refined maida flour", "Rapid enzymatic starch breakdown accelerates blood glucose spike"]
             summary = "Thinly rolled refined maida flatbread. Lacks bran fiber, resulting in rapid starch absorption and elevated glycemic load."
             customization = "Substitute with stone-ground whole wheat tandoori roti or multi-grain phulka."
-        elif "double ka meetha" in full_text or "shahi tukda" in full_text:
+        elif any(d in full_text for d in ["double ka meetha", "shahi tukda", "lava cake", "chocolate cake", "ice cream", "sundae", "brownie", "gulab jamun", "jalebi", "cheesecake"]):
             score = 15
             matched_groups = ["Deep Fried Foods", "Added Sugars & Confectionery", "Refined Carbohydrates"]
-            greens = ["Cardamom and saffron aromatic bioflavonoids"]
-            reds = ["Deep-fried bread soaked in concentrated sugar syrup", "High saturated dairy fat from thickened rabri/khoya", "Severe acute glycemic spike risk"]
-            summary = "Traditional dessert consisting of deep-fried bread steeped in sugar syrup and condensed milk solids. Represents an acute glycemic and saturated lipid load."
+            greens = ["Aromatic cocoa and spice bioflavonoids"]
+            reds = ["High simple sugar content causes severe postprandial glucose spike", "High saturated dairy fat and caloric density"]
+            summary = "High-glycemic confectionery and dessert. Contains concentrated sucrose and saturated fats, conflicting with glucose management and caloric targets."
             customization = "Share a single small portion or substitute with fresh fruit and unsweetened probiotic curd."
         elif "diet coke" in full_text or "diet pepsi" in full_text or "zero sugar" in full_text:
             score = 72
@@ -718,13 +751,13 @@ Return ONLY valid JSON matching this schema:
 
             score = max(5, min(98, score))
             if score >= self.good_threshold:
-                summary = f"Strong nutritional alignment with the user's active health matrix. Low glycemic impact with quality micronutrient density."
+                summary = f"Strong nutritional alignment for '{name}'. Low glycemic impact with quality micronutrient density."
                 customization = "Pair with a fresh green salad or steamed whole grain side."
             elif score >= self.bad_threshold:
-                summary = f"Moderate metabolic fit. Acceptable in portion-controlled servings with mindful sodium and fat balance."
+                summary = f"Moderate metabolic fit for '{name}'. Acceptable in portion-controlled servings with mindful sodium and fat balance."
                 customization = "Request light cooking oil or sauce on the side."
             else:
-                summary = f"Not recommended due to high refined carbohydrate, saturated fat, or sodium density."
+                summary = f"'{name}' is not recommended due to high refined carbohydrate, saturated fat, or sodium density."
                 customization = "Consider substituting with grilled, tandoori, or unrefined whole food alternatives."
 
         tier = FoodTier.GOOD if score >= self.good_threshold else (FoodTier.MEDIUM if score >= self.bad_threshold else FoodTier.BAD)

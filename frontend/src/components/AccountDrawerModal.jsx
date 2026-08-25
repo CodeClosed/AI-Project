@@ -360,6 +360,36 @@ export default function AccountDrawerModal({
             </div>
           </div>
 
+          {/* Gemini API Key Configuration */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-emerald-600" /> Gemini API Key (For Custom Recommendations)
+              </span>
+              <span className="text-[10px] text-slate-400 font-normal">Optional (uses .env if omitted)</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                placeholder="AIzaSy... (Paste your Gemini API key)"
+                value={profile.api_key || ''}
+                onChange={(e) => handleFieldChange('api_key', e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-3 pr-10 py-2 text-xs font-mono text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                title={showApiKey ? 'Hide API Key' : 'Show API Key'}
+              >
+                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Personalizes dish-by-dish clinical reasons, green/red flags, and chef advice via Google Gemini Flash.
+            </p>
+          </div>
+
           {/* Clinical Guardrails Info Banner */}
           <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200 text-slate-700 space-y-1">
             <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-800">

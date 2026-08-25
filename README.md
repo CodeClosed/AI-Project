@@ -61,15 +61,21 @@ graph TD
   - Clinical Guardrails (Sodium ceiling, Glycemic sensitivity, Saturated fat limit, Minimum fiber).
   - Hard Exclusion Mask.
 
-### 3. 🍽️ Step 3: 3-Tier Food Recommendation Dashboard
+### 3. 🍽️ Step 3: 3-Tier Food Recommendation Dashboard & Export Studio
 - **KPI Summary**: Total Evaluated, 🟢 Good, 🟡 Medium, and 🔴 Bad counts.
-- **Top Recommendation Spotlight**: Highlighted banner showcasing the single best dish for your health matrix.
-- **Card Designs**:
-  - **🟢 Tier 1: GOOD**: Fit Score badge (`92/100`), green benefit tags (`🌿 High Protein 24g`), and chef customization callouts (`💡 Ask for dressing on the side`).
-  - **🟡 Tier 2: MEDIUM**: Caution badges (`⚠️ Moderate Saturated Fat`), and modification tips.
-  - **🔴 Tier 3: BAD**: High-visibility allergy conflict banner (`⛔ HARD CONFLICT: Peanuts`), and metabolic risk reasons.
-- **Search & Filter**: Filter by tier tabs or search dynamically by keyword.
-- **Export Reports**: Instant download in JSON or Markdown format.
+- **Top Recommendation Spotlight**: Highlighted spotlight card showcasing the single best dish for your health matrix.
+- **Gemini AI Personalization**:
+  - Deep biochemical clinical assessments customized to exact dish recipes.
+  - Bespoke culinary green flags and red flags.
+  - Actionable chef modification tips (e.g. *"Swap for Dum Soya Chaap Biryani"*, *"Request unbuttered 100% whole wheat tandoori roti"*).
+- **Hard Safety & Allergen Authority**: Instant zero-score override for declared allergens and ethical diets (e.g. meat on vegetarian protocols, dairy/eggs on vegan diets).
+- **Search & Filter**: Real-time unified combined table or segmented tier tabs (Good / Medium / Bad).
+- **Multi-Format Export Studio**:
+  - 📊 **CSV Spreadsheet** (`.csv`) for Excel & Google Sheets
+  - 📝 **Markdown Report** (`.md`) for Obsidian, Notion & GitHub
+  - 🖨️ **Printable HTML / PDF** (`.html`) ready to print or save
+  - 💻 **Raw JSON Payload** (`.json`) for developer integration
+  - 📄 **Plain Text Summary** (`.txt`) for quick review
 
 ---
 
@@ -92,7 +98,21 @@ cd ..
 
 ---
 
-### 2. Launch the Application
+### 2. Configure Gemini API Key (Optional)
+
+You can provide your Gemini API key in either of two ways:
+1. **Via `.env` file** in the project root:
+   ```env
+   GEMINI_API_KEY=your_actual_gemini_api_key
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+2. **Via UI Profile Drawer**: Click your profile badge in the top right of the web app, enter your API key, and click **Save & Sync Matrix**.
+
+*(If no API key is provided, the application seamlessly runs on its 100% offline deterministic rule engine).*
+
+---
+
+### 3. Launch the Application
 
 #### Option A: Modern React + FastAPI Full-Stack (Recommended)
 Runs both the FastAPI backend and React frontend concurrently:
@@ -111,7 +131,7 @@ python run_ui.py
 
 ---
 
-## 🧪 Automated Offline Test Suite
+## 🧪 Automated Test Suite
 
 The test suite runs 100% offline without requiring active API keys:
 
@@ -124,9 +144,12 @@ python -m pytest -v
 | :--- | :--- | :---: |
 | `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | ✅ PASSED (6/6) |
 | `tests/test_safety_and_rules.py` | Strict allergen exclusions (score = 0), diabetic glycemic penalties | ✅ PASSED (7/7) |
+| `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | ✅ PASSED (6/6) |
 | `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, mocked HTTP | ✅ PASSED (9/9) |
+| `tests/test_matrix_generator.py` | Metabolic energy equations, macro distribution, clinical vectors | ✅ PASSED (3/3) |
 | `tests/test_integration_pipeline.py` | End-to-end OCR $\to$ Matrix $\to$ 3-Tier Matchmaker | ✅ PASSED (2/2) |
 | `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | ✅ PASSED (5/5) |
+| `tests/test_nutrition_ai.py` | Heuristic dish evaluator, macro splits, markdown serialization | ✅ PASSED (6/6) |
 
 ---
 
@@ -156,8 +179,8 @@ To guarantee clinical safety, recommendations follow a strict two-stage hierarch
                                🟢 GOOD / 🟡 MEDIUM / 🔴 BAD
 ```
 
-1. **Deterministic Override**: If a dish contains declared allergens (e.g. peanuts, tree nuts, gluten) or violates explicit dietary choices (e.g. meat for a vegetarian), it is **instantly forced to Tier 🔴 BAD (Fit Score = 0)**.
-2. **Zero AI Override**: AI generative models are never permitted to override hard safety constraints.
+1. **Deterministic Override**: If a dish contains declared allergens (e.g. peanuts, tree nuts, gluten) or violates explicit dietary choices (e.g. meat for a vegetarian, dairy for a vegan), it is **instantly forced to Tier 🔴 BAD (Fit Score = 0)**.
+2. **Zero AI Override**: Generative AI models are never permitted to override hard safety constraints.
 
 ---
 
@@ -167,8 +190,8 @@ The FastAPI backend exposes standard OpenAPI REST endpoints:
 
 - `POST /api/ocr/extract`: Multipart image file upload. Runs deskewing, enhancement, OCR, and noise filtering. Returns structured dishes.
 - `POST /api/matrix/generate`: Accepts user biometrics and clinical conditions. Returns daily metabolic energy and clinical risk vector matrix.
-- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix and classifies them into 3 tiers.
-- `GET /api/health`: Service health and active OCR device (`cuda` / `cpu`).
+- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix with optional Gemini API key. Returns 3-tier classification and structured reports.
+- `GET /api/health`: Service health status, Gemini availability, and active OCR device (`cuda` / `cpu`).
 
 Interactive documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
