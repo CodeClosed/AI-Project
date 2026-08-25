@@ -101,17 +101,17 @@ export default function App() {
   }, [dishes]);
 
   return (
-    <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col justify-between selection:bg-emerald-500 selection:text-slate-950 font-sans">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col justify-between selection:bg-emerald-500 selection:text-white font-sans">
       {/* Top Navbar */}
-      <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-50">
+      <header className="border-b border-slate-200/90 bg-white/90 backdrop-blur-md sticky top-0 z-50 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-glow-green">
-              <Salad className="w-5 h-5 text-slate-950 font-bold" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-sm">
+              <Salad className="w-5 h-5 text-white font-bold" />
             </div>
             <div>
-              <span className="font-black text-lg text-white tracking-tight flex items-center gap-1.5">
-                NutriMenu <span className="text-emerald-400">AI</span>
+              <span className="font-black text-lg text-slate-900 tracking-tight flex items-center gap-1.5">
+                NutriMenu <span className="text-emerald-600">AI</span>
               </span>
               <span className="text-[10px] text-slate-500 block leading-none font-semibold">
                 Clinical Menu Intelligence & Matchmaker
@@ -120,8 +120,8 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Deterministic Clinical Safety Authority
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Deterministic Clinical Safety Authority
             </span>
           </div>
         </div>
@@ -161,12 +161,12 @@ export default function App() {
       </main>
 
       {/* Footer Disclaimer */}
-      <footer className="border-t border-slate-800/60 bg-slate-950/60 py-6 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-200/80 bg-white py-6 text-center text-xs text-slate-500">
         <div className="max-w-4xl mx-auto px-4">
-          <p className="flex items-center justify-center gap-1.5 mb-1 text-slate-400 font-semibold">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" /> Medical & Nutritional Guidance Disclaimer
+          <p className="flex items-center justify-center gap-1.5 mb-1 text-slate-700 font-semibold">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" /> Medical & Nutritional Guidance Disclaimer
           </p>
-          <p className="text-[11px] leading-relaxed">
+          <p className="text-[11px] text-slate-500 leading-relaxed">
             Recommendations are computational estimates based on user biometric inputs and published clinical nutritional literature. This application is not a medical device and does not substitute for clinical advice from a licensed medical professional or registered dietitian.
           </p>
         </div>
