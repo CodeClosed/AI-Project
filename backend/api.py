@@ -65,6 +65,7 @@ class UserProfilePayload(BaseModel):
     allergies: List[str] = Field(default_factory=list)
     dietary_preferences: List[str] = Field(default_factory=list)
     raw_bio_text: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class DishItem(BaseModel):
@@ -87,6 +88,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "NutriMenu AI API",
+        "gemini_active": matrix_generator.is_available(),
         "ocr_device": getattr(ocr_pipeline.ocr_engine, "active_device", "cpu"),
     }
 
@@ -138,10 +140,11 @@ async def extract_menu_from_image(file: UploadFile = File(...)):
 @app.post("/api/matrix/generate")
 def generate_user_matrix(profile: UserProfilePayload):
     """
-    Synthesizes metabolic energy targets, macro distribution, and clinical guardrails.
+    Synthesizes metabolic energy targets, macro distribution, and clinical guardrails via Gemini API.
     """
     try:
-        matrix: UserNutritionalMatrix = matrix_generator.generate(
+        gen = AIMatrixGenerator(api_key=profile.api_key) if profile.api_key else matrix_generator
+        matrix: UserNutritionalMatrix = gen.generate(
             profile.model_dump(),
             user_id="active_user",
         )

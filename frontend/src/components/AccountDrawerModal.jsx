@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, User, Heart, ShieldAlert, Sparkles, Flame, Scale, Check, Activity, Target } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, User, Heart, ShieldAlert, Sparkles, Flame, Scale, Check, Key, Eye, EyeOff, BrainCircuit } from 'lucide-react';
 
 export default function AccountDrawerModal({
   isOpen,
@@ -11,6 +11,9 @@ export default function AccountDrawerModal({
   loadingMatrix,
 }) {
   if (!isOpen) return null;
+
+  const [savedFeedback, setSavedFeedback] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const conditionsList = [
     { id: 'hypertension', label: 'Hypertension', icon: '🫀' },
@@ -52,8 +55,72 @@ export default function AccountDrawerModal({
     setProfile({ ...profile, [field]: value });
   };
 
-  const m = userMatrix?.metabolic_targets;
-  const g = userMatrix?.nutritional_guardrails;
+  // Instant reactive real-time metabolic target calculation (Mifflin-St Jeor & WHO equation)
+  const dynamicMetabolic = useMemo(() => {
+    const age = Number(profile.age) || 30;
+    const gender = String(profile.gender || 'male').toLowerCase();
+    const height = Number(profile.height_cm) || 170;
+    const weight = Number(profile.weight_kg) || 70;
+    const activity = String(profile.activity_level || 'sedentary').toLowerCase();
+    const goal = String(profile.primary_goal || 'maintenance').toLowerCase();
+
+    // 1. BMR
+    const s = gender === 'male' ? 5.0 : -161.0;
+    const bmr = 10.0 * weight + 6.25 * height - 5.0 * age + s;
+
+    // 2. PAL & TDEE
+    const palMap = {
+      sedentary: 1.2,
+      light: 1.375,
+      moderate: 1.55,
+      heavy: 1.725,
+      athlete: 1.9,
+    };
+    const pal = palMap[activity] || 1.2;
+    const tdee = bmr * pal;
+
+    // 3. Caloric Target
+    let adj = 0.0;
+    if (goal.includes('fat_loss') || goal.includes('deficit') || goal.includes('weight_loss')) {
+      adj = -0.20;
+    } else if (goal.includes('muscle') || goal.includes('gain') || goal.includes('surplus')) {
+      adj = 0.10;
+    }
+    const targetCalories = Math.max(1000, tdee * (1.0 + adj));
+
+    // 4. Macro Splits
+    const pPerKg = adj !== 0.0 ? 1.8 : 1.2;
+    const pG = weight * pPerKg;
+    const pKcal = pG * 4.0;
+    const pPct = Math.min(60, (pKcal / targetCalories) * 100.0);
+
+    const fPct = 25.0;
+    const fKcal = targetCalories * (fPct / 100.0);
+    const fG = fKcal / 9.0;
+
+    const cKcal = Math.max(0, targetCalories - pKcal - fKcal);
+    const cG = Math.max(30.0, cKcal / 4.0);
+    const cPct = Math.max(15, 100.0 - pPct - fPct);
+
+    return {
+      bmr_kcal: Math.round(bmr),
+      tdee_kcal: Math.round(tdee),
+      target_calories_kcal: Math.round(targetCalories),
+      caloric_adjustment_ratio: adj,
+      target_protein_g: Math.round(pG),
+      target_protein_pct: Math.round(pPct),
+      target_carbs_g: Math.round(cG),
+      target_carbs_pct: Math.round(cPct),
+      target_fats_g: Math.round(fG),
+      target_fats_pct: Math.round(fPct),
+    };
+  }, [profile]);
+
+  const handleSave = async () => {
+    await onSaveProfile();
+    setSavedFeedback(true);
+    setTimeout(() => setSavedFeedback(false), 3000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -72,7 +139,12 @@ export default function AccountDrawerModal({
               <User className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 leading-tight">My Health Profile & Matrix</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900 leading-tight">My Health Profile & Matrix</h2>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-emerald-600" /> Gemini AI
+                </span>
+              </div>
               <p className="text-xs text-slate-500">Configure your biometrics, conditions, and strict allergens</p>
             </div>
           </div>
@@ -86,36 +158,53 @@ export default function AccountDrawerModal({
 
         {/* Modal Scrollable Body */}
         <div className="p-6 overflow-y-auto space-y-6 text-slate-800">
-          {/* Live Metabolic Target Banner */}
-          {m && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-slate-50 border border-emerald-200 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Daily Energy Target</span>
-                  <span className="text-2xl font-black text-emerald-700 tabular-nums">{Math.round(m.target_calories_kcal)}</span>
-                  <span className="text-xs text-slate-500 ml-1">kcal/day</span>
-                </div>
-                <div className="text-right">
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold">
-                    {m.caloric_adjustment_ratio > 0 ? `+${Math.round(m.caloric_adjustment_ratio * 100)}%` : `${Math.round(m.caloric_adjustment_ratio * 100)}% Deficit`}
-                  </span>
-                  <div className="text-[10px] text-slate-400 mt-1">BMR: {Math.round(m.bmr_kcal)} | TDEE: {Math.round(m.tdee_kcal)}</div>
-                </div>
+          {/* Live Reactive Metabolic Target Banner */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-slate-50 border border-emerald-200 shadow-xs transition-all duration-300">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Daily Energy Target
+                </span>
+                <span className="text-2xl font-black text-emerald-700 tabular-nums">
+                  {dynamicMetabolic.target_calories_kcal}
+                </span>
+                <span className="text-xs text-slate-500 ml-1">kcal/day</span>
               </div>
-
-              {/* Macro Bar */}
-              <div className="h-2 w-full bg-slate-200 rounded-full flex overflow-hidden">
-                <div style={{ width: `${m.target_protein_pct}%` }} className="bg-emerald-500" />
-                <div style={{ width: `${m.target_carbs_pct}%` }} className="bg-blue-500" />
-                <div style={{ width: `${m.target_fats_pct}%` }} className="bg-amber-500" />
-              </div>
-              <div className="flex justify-between text-[11px] font-semibold mt-1.5 text-slate-700 tabular-nums">
-                <span>🥩 {Math.round(m.target_protein_g)}g Protein</span>
-                <span>🌾 {Math.round(m.target_carbs_g)}g Carbs</span>
-                <span>🥑 {Math.round(m.target_fats_g)}g Fat</span>
+              <div className="text-right">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition-all">
+                  {dynamicMetabolic.caloric_adjustment_ratio > 0
+                    ? `+${Math.round(dynamicMetabolic.caloric_adjustment_ratio * 100)}% Surplus`
+                    : dynamicMetabolic.caloric_adjustment_ratio < 0
+                    ? `${Math.round(dynamicMetabolic.caloric_adjustment_ratio * 100)}% Deficit`
+                    : 'Maintenance'}
+                </span>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  BMR: {dynamicMetabolic.bmr_kcal} | TDEE: {dynamicMetabolic.tdee_kcal}
+                </div>
               </div>
             </div>
-          )}
+
+            {/* Dynamic Macro Bar */}
+            <div className="h-2.5 w-full bg-slate-200 rounded-full flex overflow-hidden transition-all duration-300">
+              <div
+                style={{ width: `${dynamicMetabolic.target_protein_pct}%` }}
+                className="bg-emerald-500 transition-all duration-300"
+              />
+              <div
+                style={{ width: `${dynamicMetabolic.target_carbs_pct}%` }}
+                className="bg-blue-500 transition-all duration-300"
+              />
+              <div
+                style={{ width: `${dynamicMetabolic.target_fats_pct}%` }}
+                className="bg-amber-500 transition-all duration-300"
+              />
+            </div>
+            <div className="flex justify-between text-[11px] font-semibold mt-1.5 text-slate-700 tabular-nums">
+              <span>🥩 {dynamicMetabolic.target_protein_g}g Protein ({dynamicMetabolic.target_protein_pct}%)</span>
+              <span>🌾 {dynamicMetabolic.target_carbs_g}g Carbs</span>
+              <span>🥑 {dynamicMetabolic.target_fats_g}g Fat</span>
+            </div>
+          </div>
 
           {/* Biometrics */}
           <div>
@@ -174,11 +263,11 @@ export default function AccountDrawerModal({
                 onChange={(e) => handleFieldChange('activity_level', e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               >
-                <option value="sedentary">Sedentary (Desk Job)</option>
-                <option value="light">Light Activity (1-2x/wk)</option>
-                <option value="moderate">Moderate Activity (3-5x/wk)</option>
-                <option value="heavy">Heavy (Daily Training)</option>
-                <option value="athlete">Athlete / Intense</option>
+                <option value="sedentary">Sedentary (Desk Job, Little Exercise)</option>
+                <option value="light">Light Activity (Exercise 1-2x/week)</option>
+                <option value="moderate">Moderate Activity (Exercise 3-5x/week)</option>
+                <option value="heavy">Heavy (Hard Exercise 6-7x/week)</option>
+                <option value="athlete">Athlete / Very Intense Training</option>
               </select>
             </div>
             <div>
@@ -188,9 +277,9 @@ export default function AccountDrawerModal({
                 onChange={(e) => handleFieldChange('primary_goal', e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               >
-                <option value="fat_loss">Fat Loss (-20% deficit)</option>
-                <option value="muscle_gain">Muscle Gain (+10% surplus)</option>
-                <option value="maintenance">Weight Maintenance</option>
+                <option value="fat_loss">Fat Loss (-20% caloric deficit)</option>
+                <option value="muscle_gain">Muscle Gain (+10% caloric surplus)</option>
+                <option value="maintenance">Weight Maintenance (Balanced)</option>
                 <option value="healthy_aging">Healthy Aging & Longevity</option>
               </select>
             </div>
@@ -199,7 +288,7 @@ export default function AccountDrawerModal({
           {/* Conditions */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <Heart className="w-3.5 h-3.5 text-rose-500" /> Medical Conditions (Triggers Guardrails)
+              <Heart className="w-3.5 h-3.5 text-rose-500" /> Medical Conditions (Triggers Clinical Guardrails)
             </label>
             <div className="flex flex-wrap gap-1.5">
               {conditionsList.map((cond) => {
@@ -270,22 +359,58 @@ export default function AccountDrawerModal({
               })}
             </div>
           </div>
+
+          {/* Gemini API Key Configuration (Optional) */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-emerald-600" /> Google Gemini API Key
+                <span className="text-[10px] font-normal text-slate-400">(Optional)</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                {showApiKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <input
+              type={showApiKey ? 'text' : 'password'}
+              placeholder="AIzaSy... (leave blank to use server environment key)"
+              value={profile.api_key || ''}
+              onChange={(e) => handleFieldChange('api_key', e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+            />
+            <p className="text-[11px] text-slate-500 leading-tight">
+              Directly integrates with Gemini 2.5/1.5 Flash for deep clinical matrix reasoning and multimodal OCR parsing.
+            </p>
+          </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer (Does NOT close the modal upon save) */}
         <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <span className="text-xs text-slate-500">
-            {loadingMatrix ? 'Recalculating metabolic matrix...' : 'Matrix automatically syncs on update'}
-          </span>
+          <div className="flex items-center gap-2">
+            {savedFeedback ? (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" /> Matrix Synced with Gemini!
+              </span>
+            ) : (
+              <span className="text-xs text-slate-500 flex items-center gap-1">
+                <BrainCircuit className="w-3.5 h-3.5 text-emerald-600" />
+                {loadingMatrix ? 'Synthesizing with Gemini API...' : 'Live metric preview active'}
+              </span>
+            )}
+          </div>
+
           <button
             type="button"
-            onClick={() => {
-              onSaveProfile();
-              onClose();
-            }}
-            className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-sm transition-all active:scale-[0.96] flex items-center gap-1.5 cursor-pointer"
+            onClick={handleSave}
+            disabled={loadingMatrix}
+            className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-sm transition-all active:scale-[0.96] flex items-center gap-1.5 cursor-pointer"
           >
-            <Check className="w-4 h-4 stroke-[2.5]" /> Save & Close
+            <Check className="w-4 h-4 stroke-[2.5]" /> Save & Sync Matrix
           </button>
         </div>
       </div>
