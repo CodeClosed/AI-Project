@@ -256,8 +256,8 @@ class TieredFoodRecommender:
 
     def check_hard_exclusions(self, dish_text: str) -> Optional[Dict[str, Any]]:
         """
-        Evaluates deterministic hard safety exclusions (allergens and strict dietary rules).
-        Returns a violation dict if violated, or None if safe.
+        Evaluates deterministic hard safety exclusions (allergens and strict dietary rules)
+        with dish-specific customized culinary substitution tips.
         """
         lower_text = dish_text.lower()
 
@@ -271,15 +271,44 @@ class TieredFoodRecommender:
         if has_meat_exclusion:
             matched_non_veg = [kw for kw in self.NON_VEG_KEYWORDS if re.search(r"\b" + re.escape(kw) + r"\b", lower_text)]
             if matched_non_veg:
+                meat = matched_non_veg[0].title()
+                
+                # Dish-Specific bespoke reason and substitution
+                if "biryani" in lower_text:
+                    if "family" in lower_text or "pack" in lower_text or "handi" in lower_text:
+                        reason = f"Large sharing platter containing multiple portions of spiced {meat.lower()} and ghee-infused basmati rice, conflicting with vegetarian diet."
+                        tip = "Substitute with a Family Soya Dum Biryani Feast or Paneer Tikka Biryani Handi with cooling cucumber raita."
+                    elif "special" in lower_text or "supreme" in lower_text:
+                        reason = f"Chef specialty biryani prepared with layered {meat.lower()} chunks, animal broth essence, and egg byproducts."
+                        tip = "Request the Special Royal Subz Awadhi Biryani prepared with saffron, grilled paneer, and toasted cashews."
+                    else:
+                        reason = f"Fragrant spiced basmati rice prepared with slow-cooked {meat.lower()} pieces and animal fats, violating vegetarian diet."
+                        tip = "Swap with Soya Chaap Biryani, Dum Jackfruit (Kathal) Biryani, or Mixed Vegetable Dum Biryani."
+                elif "burger" in lower_text or "sandwich" in lower_text:
+                    reason = f"Contains animal meat patty/filling derived from {meat.lower()}, conflicting with vegetarian lifestyle."
+                    tip = "Request a Crispy Spiced Chickpea-Beetroot Patty, Grilled Portobello, or Tandoori Paneer Steak Burger."
+                elif "kebab" in lower_text or "tikka" in lower_text or "roast" in lower_text:
+                    reason = f"Charcoal-roasted animal protein ({meat.lower()}) marinated in animal-seasoned spices."
+                    tip = "Order Tandoori Paneer Tikka, Malai Soya Chaap, or Roasted Stuffed Button Mushrooms."
+                elif "curry" in lower_text or "gravy" in lower_text or "makhani" in lower_text or "masala" in lower_text:
+                    reason = f"Slow-simmered curry base containing {meat.lower()} protein and rendered animal lipids."
+                    tip = "Order Paneer Butter Masala, Soya Chaap Rogan Josh, or Mushroom Do Pyaza with identical rich spices."
+                elif "soup" in lower_text or "broth" in lower_text:
+                    reason = f"Contains animal-derived {meat.lower()} broth and bone essence."
+                    tip = "Ask for Clear Vegetable Wonton Soup or Sweet Corn Asparagus Soup with tofu."
+                else:
+                    reason = f"Contains {meat.lower()} animal meat protein, conflicting with your vegetarian lifestyle."
+                    tip = f"Request a plant-based protein alternative such as grilled paneer, soya chaap, or seasoned tofu."
+
                 return {
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
-                    "summary_reason": f"Violates strict vegetarian lifestyle (contains non-veg animal ingredient: '{matched_non_veg[0]}').",
-                    "matched_food_groups": ["Animal Meat"],
+                    "summary_reason": reason,
+                    "matched_food_groups": [f"{meat} Poultry / Meat"],
                     "green_flags": [],
-                    "red_flags": [f"Contains non-vegetarian animal meat: {matched_non_veg[0]}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({matched_non_veg[0]})"],
-                    "customization_tips": "Request a 100% vegetarian plant-based or dairy protein substitute.",
+                    "red_flags": [f"Contains non-vegetarian animal ingredient: {meat.lower()}"],
+                    "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({meat.lower()})"],
+                    "customization_tips": tip,
                 }
 
         # 2. Vegan / Dairy / Egg exclusion check
@@ -287,15 +316,16 @@ class TieredFoodRecommender:
         if has_vegan_exclusion:
             matched_dairy_egg = [kw for kw in self.VEGAN_EXCLUSIONS if re.search(r"\b" + re.escape(kw) + r"\b", lower_text)]
             if matched_dairy_egg:
+                item_name = matched_dairy_egg[0].title()
                 return {
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
-                    "summary_reason": f"Violates vegan/dairy restriction (contains dairy or egg byproduct: '{matched_dairy_egg[0]}').",
-                    "matched_food_groups": ["Dairy / Egg"],
+                    "summary_reason": f"Contains animal-derived dairy or egg ingredient ({item_name.lower()}), conflicting with vegan/dairy-free protocol.",
+                    "matched_food_groups": ["Dairy / Egg Byproduct"],
                     "green_flags": [],
-                    "red_flags": [f"Contains animal byproduct: {matched_dairy_egg[0]}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({matched_dairy_egg[0]})"],
-                    "customization_tips": "Ask for dairy-free or plant-based preparation.",
+                    "red_flags": [f"Contains animal byproduct: {item_name.lower()}"],
+                    "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({item_name.lower()})"],
+                    "customization_tips": f"Ask the kitchen for dairy-free coconut milk/cashew cream preparation or tofu substitution.",
                 }
 
         # 3. Strict Allergens Matching
@@ -324,12 +354,12 @@ class TieredFoodRecommender:
                     return {
                         "tier": FoodTier.BAD,
                         "fit_score": 0,
-                        "summary_reason": f"Critical Allergen Conflict: Dish contains declared allergen '{allergy}' ({target}).",
-                        "matched_food_groups": [f"Allergen: {allergy}"],
+                        "summary_reason": f"Critical Allergen Alert: Recipe incorporates declared allergen '{allergy}' ({target}).",
+                        "matched_food_groups": [f"Allergen: {allergy.title()}"],
                         "green_flags": [],
-                        "red_flags": [f"Zero-tolerance allergen alert: {allergy}"],
-                        "allergen_warnings": [f"Contains Allergen: {allergy}"],
-                        "customization_tips": "Requires complete kitchen cross-contact isolation or choose a safe allergen-free alternative.",
+                        "red_flags": [f"Zero-tolerance allergen detected: {allergy}"],
+                        "allergen_warnings": [f"Contains Declared Allergen: {allergy}"],
+                        "customization_tips": f"Requires complete kitchen cross-contact isolation or choose a guaranteed {allergy}-free dish.",
                     }
 
         return None
@@ -408,7 +438,7 @@ class TieredFoodRecommender:
         else:
             recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
 
-        # Post-check: Double ensure hard safety constraints across ALL recommendations
+        # Post-check: Enforce hard safety constraints across ALL recommendations
         validated_recs: List[TieredFoodRecommendation] = []
         for rec in recommendations:
             full_text = f"{rec.dish_name} {' '.join(rec.matched_food_groups)}"
@@ -416,9 +446,13 @@ class TieredFoodRecommender:
             if violation:
                 rec.tier = FoodTier.BAD
                 rec.fit_score = 0
-                rec.summary_reason = violation["summary_reason"]
-                rec.allergen_warnings = list(set(rec.allergen_warnings + violation["allergen_warnings"]))
-                rec.red_flags = list(set(rec.red_flags + violation["red_flags"]))
+                # Preserve Gemini summary if detailed, else use dish-specific violation
+                if not rec.summary_reason or len(rec.summary_reason) < 20 or "Classified based" in rec.summary_reason:
+                    rec.summary_reason = violation["summary_reason"]
+                if not rec.customization_tips or "pair with" in rec.customization_tips.lower():
+                    rec.customization_tips = violation["customization_tips"]
+                rec.allergen_warnings = list(dict.fromkeys(rec.allergen_warnings + violation["allergen_warnings"]))
+                rec.red_flags = list(dict.fromkeys(rec.red_flags + violation["red_flags"]))
             validated_recs.append(rec)
 
         # Sort all recommendations by fit_score descending
@@ -486,15 +520,20 @@ DISHES TO EVALUATE:
 {json.dumps(dishes, indent=2)}
 
 CRITICAL INSTRUCTIONS FOR HIGH-CRAFT, BESPOKE ANALYSIS:
-1. ZERO-GENERIC POLICY: Do NOT use boilerplate phrases like "Moderate fit", "Good choice", or "Pair with salad". Every single field MUST be 100% UNIQUE and specific to the exact ingredients, cooking technique, and biochemistry of THAT particular dish.
+1. ZERO-GENERIC POLICY: Do NOT use boilerplate phrases like "Moderate fit", "Good choice", or generic repeats. Every single field MUST be 100% UNIQUE, vivid, and specific to the exact ingredients, cooking technique, and biochemistry of THAT particular dish.
 2. DISH-SPECIFIC CLINICAL ASSESSMENT ('summary_reason'):
-   - Provide a 2-3 sentence rigorous clinical breakdown directly naming the specific culinary ingredients (e.g. makhani cashew gravy, stone-ground whole wheat atta, refined maida, russet potato starch, aspartame, deep-fry oil, cheese casein).
-   - Explain the direct biochemical impact on the user's health conditions (e.g. postprandial glycemic spike, LDL atherogenic lipid load, arterial endothelial strain from sodium, or gastric acid reflux).
+   - Provide a 2-3 sentence rigorous clinical breakdown directly naming the specific culinary ingredients (e.g. makhani cashew gravy, stone-ground whole wheat atta, refined maida, russet potato starch, aspartame, deep-fry oil, cheese casein, basmati rice amylose).
+   - If the dish violates a lifestyle rule (like vegetarianism), explain the specific dish anatomy (e.g. for 'Chicken Biryani': "Layered fragrant basmati rice cooked with spiced bone-in poultry meat and animal lipids, directly violating vegetarian principles").
 3. DISTINCT NUTRITIONAL FLAGS:
    - 'green_flags': 2-3 specific biochemical strengths of this exact dish (e.g. "Tandoor dry-heat preparation avoids oxidized cooking fats", "Rich in lycopene from slow-cooked tomatoes", "High biological value complete poultry protein").
-   - 'red_flags': 2-3 specific clinical caution areas of this exact dish (e.g. "High dairy cream and butter emulsion elevates saturated fat", "Refined starch causes rapid glycemic surge", "Deep-fryer thermal degradation produces advanced lipid peroxides").
+   - 'red_flags': 2-3 specific clinical caution areas of this exact dish (e.g. "Heavy dairy cream and butter emulsion elevates saturated fat", "Refined starch causes rapid glycemic surge", "Deep-fryer thermal degradation produces advanced lipid peroxides").
 4. BESPOKE CHEF CUSTOMIZATION ADVICE ('customization_tips'):
-   - Provide practical, realistic culinary hacks tailored specifically to that dish (e.g. for curries: "Ask the kitchen to prepare with half the butter and substitute heavy cream with whisked dahi; request gravy on the side"; for rotis: "Request unbuttered 100% whole wheat roti rather than maida-based naan"; for burgers: "Request a lettuce wrap to cut 180 kcal of refined carbs and skip the mayo").
+   - Provide practical, creative culinary hacks tailored specifically to that dish:
+     - For Biryanis: suggest specific vegetarian alternatives like "Swap with Dum Soya Chaap Biryani, Paneer Tikka Biryani, or Jackfruit (Kathal) Handi Biryani with cucumber mint raita".
+     - For Family Packs: suggest "Order the Family Soya Dum Biryani Feast or Assorted Tandoori Paneer & Subz Platter to share".
+     - For Curries: suggest "Ask the kitchen to prepare with half the butter and substitute heavy cream with whisked dahi".
+     - For Rotis: suggest "Request unbuttered 100% whole wheat tandoori roti rather than maida-based naan".
+     - For Burgers: suggest "Request a spiced chickpea patty or grilled paneer steak on a whole wheat bun".
 5. HARD SAFETY VIOLATIONS: If a dish violates declared allergens or vegetarian/vegan restrictions, force Tier = "BAD", fit_score = 0, and describe the exact violation in 'allergen_warnings'.
 
 Return ONLY valid JSON matching this schema:
@@ -539,9 +578,10 @@ Return ONLY valid JSON matching this schema:
             if violation:
                 tier = FoodTier.BAD
                 score = 0
-                summary = violation["summary_reason"]
-                warnings = violation["allergen_warnings"]
-                reds = violation["red_flags"]
+                summary = d.get("summary_reason") if d.get("summary_reason") and len(d.get("summary_reason")) > 25 and "Classified based" not in d.get("summary_reason") else violation["summary_reason"]
+                tips = d.get("customization_tips") if d.get("customization_tips") and len(d.get("customization_tips")) > 20 else violation["customization_tips"]
+                warnings = list(dict.fromkeys(d.get("allergen_warnings", []) + violation["allergen_warnings"]))
+                reds = list(dict.fromkeys(d.get("red_flags", []) + violation["red_flags"]))
             else:
                 if score >= self.good_threshold:
                     tier = FoodTier.GOOD
@@ -550,6 +590,7 @@ Return ONLY valid JSON matching this schema:
                 else:
                     tier = FoodTier.BAD
                 summary = d.get("summary_reason", "Classified based on clinical nutritional matrix.")
+                tips = d.get("customization_tips")
                 warnings = d.get("allergen_warnings", [])
                 reds = d.get("red_flags", [])
 
@@ -563,7 +604,7 @@ Return ONLY valid JSON matching this schema:
                     green_flags=d.get("green_flags", []),
                     red_flags=reds,
                     allergen_warnings=warnings,
-                    customization_tips=d.get("customization_tips"),
+                    customization_tips=tips,
                     estimated_calories=d.get("estimated_calories"),
                     estimated_protein_g=d.get("estimated_protein_g"),
                     estimated_carbs_g=d.get("estimated_carbs_g"),
