@@ -1,5 +1,23 @@
-import React, { useState } from 'react';
-import { Trophy, Search, Download, CheckCircle2, AlertCircle, XCircle, Sparkles, Lightbulb, ShieldAlert, Play, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Trophy,
+  Search,
+  Download,
+  CheckCircle2,
+  AlertCircle,
+  XCircle,
+  Sparkles,
+  Lightbulb,
+  ShieldAlert,
+  Play,
+  Loader2,
+  ChevronDown,
+  FileSpreadsheet,
+  FileText,
+  FileCode,
+  Printer,
+  File,
+} from 'lucide-react';
 
 export default function RecommendationTableSection({
   dishes,
@@ -10,6 +28,19 @@ export default function RecommendationTableSection({
 }) {
   const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' | 'GOOD' | 'MEDIUM' | 'BAD'
   const [searchQuery, setSearchQuery] = useState('');
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDownloadMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const counts = evalResult?.tier_counts || { GOOD: 0, MEDIUM: 0, BAD: 0 };
   const allRecs = evalResult?.all_recommendations || [];
@@ -30,14 +61,219 @@ export default function RecommendationTableSection({
     return true;
   });
 
-  const downloadJson = () => {
-    if (!evalResult) return;
-    const blob = new Blob([JSON.stringify(evalResult, null, 2)], { type: 'application/json' });
+  const triggerDownload = (content, filename, mimeType) => {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'nutrimenu_recommendations.json';
+    a.download = filename;
     a.click();
+    setIsDownloadMenuOpen(false);
+  };
+
+  // 1. JSON Export
+  const exportJSON = () => {
+    if (!evalResult) return;
+    const jsonStr = JSON.stringify(
+      {
+        exported_at: new Date().toISOString(),
+        metadata: evalResult.metadata || {},
+        tier_counts: evalResult.tier_counts,
+        top_pick: evalResult.top_pick,
+        recommendations: evalResult.all_recommendations,
+      },
+      null,
+      2
+    );
+    triggerDownload(jsonStr, 'nutrimenu_recommendations.json', 'application/json');
+  };
+
+  // 2. CSV Export
+  const exportCSV = () => {
+    if (!evalResult) return;
+    const headers = [
+      'Tier',
+      'Fit Score',
+      'Dish Name',
+      'Price',
+      'Clinical Assessment',
+      'Green Flags',
+      'Red Flags',
+      'Allergen Warnings',
+      'Chef Customization Tips',
+    ];
+
+    const escapeCsv = (val) => {
+      const str = String(val || '').replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = allRecs.map((r) => [
+      escapeCsv(r.tier),
+      escapeCsv(r.fit_score),
+      escapeCsv(r.dish_name),
+      escapeCsv(r.price || ''),
+      escapeCsv(r.summary_reason),
+      escapeCsv((r.green_flags || []).join('; ')),
+      escapeCsv((r.red_flags || []).join('; ')),
+      escapeCsv((r.allergen_warnings || []).join('; ')),
+      escapeCsv(r.customization_tips || ''),
+    ]);
+
+    const csvContent = [headers.map(escapeCsv).join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    triggerDownload(csvContent, 'nutrimenu_recommendations.csv', 'text/csv;charset=utf-8;');
+  };
+
+  // 3. Markdown Report Export
+  const exportMarkdown = () => {
+    if (!evalResult) return;
+    const dateStr = new Date().toLocaleDateString();
+    let md = `# 🥗 NutriMenu AI — Clinical Recommendation Report\n\n`;
+    md += `**Generated Date**: ${dateStr}\n`;
+    md += `**Total Dishes Evaluated**: ${evalResult.total_items_evaluated}\n\n`;
+    md += `### 📊 Summary Counts\n`;
+    md += `- 🟢 **Tier 1 (GOOD)**: ${counts.GOOD} items\n`;
+    md += `- 🟡 **Tier 2 (MEDIUM)**: ${counts.MEDIUM} items\n`;
+    md += `- 🔴 **Tier 3 (BAD)**: ${counts.BAD} items\n\n`;
+
+    if (evalResult.top_pick) {
+      md += `### 🏆 Top Pick Spotlight\n`;
+      md += `**${evalResult.top_pick.dish_name}** (Fit Score: ${evalResult.top_pick.fit_score}/100)\n`;
+      md += `_${evalResult.top_pick.summary_reason}_\n\n`;
+    }
+
+    md += `## 📋 Recommendation Table\n\n`;
+    md += `| Tier | Score | Dish Name | Price | Clinical Assessment | Flags & Warnings | Chef Tip |\n`;
+    md += `| :--- | :---: | :--- | :---: | :--- | :--- | :--- |\n`;
+
+    allRecs.forEach((r) => {
+      const tierBadge = r.tier === 'GOOD' ? '🟢 GOOD' : r.tier === 'MEDIUM' ? '🟡 MEDIUM' : '🔴 BAD';
+      const flags = [
+        ...(r.allergen_warnings || []).map((a) => `⛔ ALLERGY: ${a}`),
+        ...(r.green_flags || []).map((g) => `🌿 ${g}`),
+        ...(r.red_flags || []).map((rf) => `⚠️ ${rf}`),
+      ].join('<br/>');
+
+      md += `| ${tierBadge} | ${r.fit_score}/100 | **${r.dish_name}** | ${r.price || '-'} | ${r.summary_reason} | ${flags || '-'} | ${r.customization_tips || '-'} |\n`;
+    });
+
+    md += `\n---\n*Disclaimer: NutriMenu AI recommendations are computational estimates based on personal biometric inputs. Not medical advice.*`;
+
+    triggerDownload(md, 'nutrimenu_recommendations.md', 'text/markdown');
+  };
+
+  // 4. HTML Printable Report Export
+  const exportHTML = () => {
+    if (!evalResult) return;
+    const dateStr = new Date().toLocaleDateString();
+
+    const rowsHtml = allRecs
+      .map((r) => {
+        const isGood = r.tier === 'GOOD';
+        const isMedium = r.tier === 'MEDIUM';
+        const tierColor = isGood ? '#059669' : isMedium ? '#D97706' : '#E11D48';
+        const tierBg = isGood ? '#ECFDF5' : isMedium ? '#FFFBEB' : '#FFF1F2';
+
+        return `
+        <tr style="border-bottom: 1px solid #E2E8F0;">
+          <td style="padding: 12px; vertical-align: top;">
+            <span style="display:inline-block; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px; background:${tierBg}; color:${tierColor};">
+              ${r.tier} (${r.fit_score}/100)
+            </span>
+          </td>
+          <td style="padding: 12px; vertical-align: top;">
+            <strong style="font-size: 13px; color: #0F172A;">${r.dish_name}</strong>
+            ${r.price ? `<div style="font-size: 11px; color: #059669; font-weight: bold; margin-top: 2px;">${r.price}</div>` : ''}
+          </td>
+          <td style="padding: 12px; vertical-align: top; font-size: 12px; color: #334155; font-style: italic;">
+            "${r.summary_reason}"
+          </td>
+          <td style="padding: 12px; vertical-align: top; font-size: 11px;">
+            ${(r.allergen_warnings || []).map((a) => `<div style="color: #BE123C; font-weight: bold; margin-bottom: 3px;">⛔ ${a}</div>`).join('')}
+            ${(r.green_flags || []).map((g) => `<div style="color: #047857; margin-bottom: 2px;">🌿 ${g}</div>`).join('')}
+            ${(r.red_flags || []).map((rf) => `<div style="color: #B45309; margin-bottom: 2px;">⚠️ ${rf}</div>`).join('')}
+          </td>
+          <td style="padding: 12px; vertical-align: top; font-size: 11px; color: #475569;">
+            ${r.customization_tips ? `<div style="background: #FEF3C7; padding: 6px; border-radius: 6px; color: #92400E;">💡 ${r.customization_tips}</div>` : '-'}
+          </td>
+        </tr>`;
+      })
+      .join('');
+
+    const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NutriMenu AI — Clinical Recommendation Report</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #FFFFFF; color: #0F172A; margin: 40px; line-height: 1.5; }
+    h1 { font-size: 24px; color: #0F172A; margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #64748B; margin-bottom: 24px; }
+    .summary { display: flex; gap: 12px; margin-bottom: 24px; }
+    .card { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #E2E8F0; text-align: center; }
+    table { width: 100%; border-collapse: collapse; text-align: left; margin-top: 16px; font-size: 12px; }
+    th { background: #F8FAFC; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #64748B; border-bottom: 2px solid #CBD5E1; }
+    @media print { body { margin: 10px; } .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>🥗 NutriMenu AI — Clinical Recommendation Report</h1>
+  <div class="meta">Generated: ${dateStr} • Total Items Evaluated: ${evalResult.total_items_evaluated}</div>
+  
+  <div class="summary">
+    <div class="card" style="background:#ECFDF5; border-color:#A7F3D0;"><div style="font-size:20px; font-weight:bold; color:#059669;">${counts.GOOD}</div><div style="font-size:11px; color:#047857;">🟢 Tier 1: Good</div></div>
+    <div class="card" style="background:#FFFBEB; border-color:#FDE68A;"><div style="font-size:20px; font-weight:bold; color:#D97706;">${counts.MEDIUM}</div><div style="font-size:11px; color:#B45309;">🟡 Tier 2: Medium</div></div>
+    <div class="card" style="background:#FFF1F2; border-color:#FECDD3;"><div style="font-size:20px; font-weight:bold; color:#E11D48;">${counts.BAD}</div><div style="font-size:11px; color:#BE123C;">🔴 Tier 3: Bad</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 140px;">Tier & Score</th>
+        <th style="width: 200px;">Dish Name & Price</th>
+        <th>Clinical Assessment</th>
+        <th style="width: 200px;">Flags & Allergens</th>
+        <th style="width: 180px;">Chef Advice</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+
+  <div style="margin-top: 40px; font-size: 10px; color: #94A3B8; text-align: center;">
+    NutriMenu AI • Computational Clinical Nutrition Engine
+  </div>
+</body>
+</html>`;
+
+    triggerDownload(htmlContent, 'nutrimenu_recommendations.html', 'text/html');
+  };
+
+  // 5. Plain Text Summary Export
+  const exportText = () => {
+    if (!evalResult) return;
+    const dateStr = new Date().toLocaleDateString();
+    let txt = `====================================================\n`;
+    txt += `  NUTRIMENU AI - FOOD RECOMMENDATIONS SUMMARY\n`;
+    txt += `  Generated: ${dateStr}\n`;
+    txt += `====================================================\n\n`;
+    txt += `Summary Counts:\n`;
+    txt += `  - 🟢 Tier 1 (GOOD):   ${counts.GOOD}\n`;
+    txt += `  - 🟡 Tier 2 (MEDIUM): ${counts.MEDIUM}\n`;
+    txt += `  - 🔴 Tier 3 (BAD):    ${counts.BAD}\n\n`;
+
+    allRecs.forEach((r, idx) => {
+      txt += `[${r.tier}] ${idx + 1}. ${r.dish_name} (${r.fit_score}/100) ${r.price || ''}\n`;
+      txt += `   Reason: "${r.summary_reason}"\n`;
+      if (r.allergen_warnings?.length) txt += `   ⛔ Allergen: ${r.allergen_warnings.join(', ')}\n`;
+      if (r.green_flags?.length) txt += `   🌿 Good: ${r.green_flags.join(', ')}\n`;
+      if (r.red_flags?.length) txt += `   ⚠️ Warning: ${r.red_flags.join(', ')}\n`;
+      if (r.customization_tips) txt += `   💡 Tip: ${r.customization_tips}\n`;
+      txt += `\n`;
+    });
+
+    triggerDownload(txt, 'nutrimenu_recommendations.txt', 'text/plain');
   };
 
   return (
@@ -105,7 +341,7 @@ export default function RecommendationTableSection({
             </div>
           )}
 
-          {/* Table Filters & Controls */}
+          {/* Table Filters & Download Menu */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
             {/* Filter Tabs (Segmented Control) */}
             <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
@@ -118,7 +354,7 @@ export default function RecommendationTableSection({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] ${
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
                     activeTab === tab.id
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-500 hover:text-slate-900'
@@ -129,7 +365,7 @@ export default function RecommendationTableSection({
               ))}
             </div>
 
-            {/* Search & Export */}
+            {/* Search & Multi-Format Download Dropdown */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <div className="relative w-full sm:w-60">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -142,13 +378,81 @@ export default function RecommendationTableSection({
                 />
               </div>
 
-              <button
-                onClick={downloadJson}
-                title="Download JSON Report"
-                className="p-2 rounded-xl bg-white border border-slate-300 text-slate-600 hover:text-emerald-700 hover:border-emerald-400 transition-all active:scale-[0.96] shadow-xs cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-              </button>
+              {/* Multi-Format Export Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setIsDownloadMenuOpen(!isDownloadMenuOpen)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 hover:text-emerald-700 hover:border-emerald-400 text-xs font-bold shadow-xs transition-all active:scale-[0.96] cursor-pointer"
+                  title="Export Options"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {isDownloadMenuOpen && (
+                  <div className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 py-1.5 text-xs text-slate-700 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      Choose Export Format
+                    </div>
+
+                    <button
+                      onClick={exportCSV}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 hover:text-emerald-700 transition-colors cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <div>
+                        <div className="font-bold">CSV Spreadsheet (.csv)</div>
+                        <div className="text-[10px] text-slate-400">For Excel & Google Sheets</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={exportMarkdown}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 hover:text-emerald-700 transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 text-blue-600" />
+                      <div>
+                        <div className="font-bold">Markdown Report (.md)</div>
+                        <div className="text-[10px] text-slate-400">For Notion, Obsidian & GitHub</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={exportHTML}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 hover:text-emerald-700 transition-colors cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-indigo-600" />
+                      <div>
+                        <div className="font-bold">Printable HTML / PDF (.html)</div>
+                        <div className="text-[10px] text-slate-400">Ready to print or save as PDF</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={exportJSON}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 hover:text-emerald-700 transition-colors cursor-pointer"
+                    >
+                      <FileCode className="w-4 h-4 text-amber-600" />
+                      <div>
+                        <div className="font-bold">Raw JSON Payload (.json)</div>
+                        <div className="text-[10px] text-slate-400">Complete structured data</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={exportText}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 hover:text-emerald-700 transition-colors cursor-pointer border-t border-slate-100"
+                    >
+                      <File className="w-4 h-4 text-slate-500" />
+                      <div>
+                        <div className="font-bold">Plain Text Summary (.txt)</div>
+                        <div className="text-[10px] text-slate-400">Quick notes format</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
