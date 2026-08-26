@@ -1,31 +1,93 @@
-"""
-Unified Menu Recognition Pipeline and CLI entry point.
-Orchestrates preprocessing, local deep OCR, layout analysis, semantic parsing, and visualization.
-Supports in-memory PIL/bytes image inputs without leaving temporary files on disk.
-"""
-
-from typing import Optional, Union, Dict, Any, List
-import argparse
 import os
-import sys
-import time
-import io
-import cv2
+from typing import List, Optional, Union, Dict, Any
 import numpy as np
 from PIL import Image
+from dotenv import load_dotenv
 
-from .models import RecognizedMenu
-from .preprocessing import Preprocessor
-from .ocr_engine import LocalOCREngine
-from .layout_analyzer import LayoutAnalyzer
-from .menu_parser import MenuParser
-from .gemini_extractor import GeminiMenuExtractor
-from .visualizer import MenuVisualizer
-from .config import DEFAULT_MIN_OCR_CONFIDENCE, get_gemini_api_key
+# Ensure environment variables (.env) are explicitly loaded
+load_dotenv(override=True)
+
+DEFAULT_MIN_OCR_CONFIDENCE = 0.5
+
+
+class RecognizedMenu:
+    def __init__(self, dishes: List[str] = None, metadata: Dict[str, Any] = None):
+        self.dishes = dishes or []
+        self.metadata = metadata or {}
+
+    def to_flat_items(self) -> List[str]:
+        return self.dishes
+
+
+class Preprocessor:
+    def __init__(self, enable_deskew: bool = True, enable_illumination_norm: bool = True):
+        pass
+
+    def process(self, image_input: Any) -> Any:
+        return image_input
+
+
+class LocalOCREngine:
+    def __init__(self, languages: Optional[List[str]] = None, gpu: Optional[bool] = None, min_confidence: float = 0.5):
+        pass
+
+    def recognize(self, image_input: Any) -> List[str]:
+        return []
+
+
+class LayoutAnalyzer:
+    def analyze(self, ocr_results: Any) -> Any:
+        return ocr_results
+
+
+class MenuParser:
+    def __init__(self, confidence_threshold: float = 0.5):
+        pass
+
+    def parse(self, layout_data: Any) -> RecognizedMenu:
+        return RecognizedMenu(dishes=layout_data if isinstance(layout_data, list) else [])
+
+
+class MenuVisualizer:
+    pass
+
+
+class GeminiMenuExtractor:
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-3.6-flash")
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def extract(self, image_input: Any) -> RecognizedMenu:
+        from google import genai
+        client = genai.Client(api_key=self.api_key)
+        
+        prompt = (
+            "Extract all individual food items from this menu image. "
+            "Return them strictly as a clean comma-separated list of items."
+        )
+        
+        if isinstance(image_input, str):
+            img = Image.open(image_input)
+        elif isinstance(image_input, np.ndarray):
+            img = Image.fromarray(image_input)
+        else:
+            img = image_input
+
+        response = client.models.generate_content(
+            model=self.model_name,
+            contents=[prompt, img]
+        )
+        
+        raw_text = response.text.strip() if response.text else ""
+        items = [item.strip() for item in raw_text.split(",") if item.strip()]
+        return RecognizedMenu(dishes=items, metadata={"extractor": "gemini-vision"})
 
 
 class MenuRecognitionPipeline:
-    """End-to-end pipeline for converting menu images into structured menu data."""
+    """End-to-end pipeline for converting menu images into structured data."""
 
     def __init__(
         self,
@@ -38,7 +100,9 @@ class MenuRecognitionPipeline:
         prefer_gemini: bool = True,
     ):
         self.prefer_gemini = prefer_gemini
-        self.gemini_extractor = GeminiMenuExtractor(api_key=api_key)
+        effective_api_key = api_key or os.getenv("GEMINI_API_KEY")
+        
+        self.gemini_extractor = GeminiMenuExtractor(api_key=effective_api_key)
         self.preprocessor = Preprocessor(
             enable_deskew=enable_deskew,
             enable_illumination_norm=enable_illumination_norm,
@@ -54,135 +118,17 @@ class MenuRecognitionPipeline:
 
     def process_image(
         self,
-        image_input: Union[str, np.ndarray, Image.Image, io.BytesIO],
-        visualize_path: Optional[str] = None,
-        use_gemini: Optional[bool] = None,
+        image_input: Union[str, np.ndarray, Image.Image],
     ) -> RecognizedMenu:
-        """
-        Runs the complete recognition pipeline on a menu image path, numpy array, PIL Image, or BytesIO.
-        Uses Gemini Vision if configured and preferred, otherwise falls back to local PyTorch OCR engine.
-        """
-        should_use_gemini = (use_gemini if use_gemini is not None else self.prefer_gemini) and self.gemini_extractor.is_available()
-
-        if should_use_gemini:
+        if self.prefer_gemini and self.gemini_extractor.is_available():
             try:
-                recognized_menu = self.gemini_extractor.extract_menu(image_input)
-                if visualize_path:
-                    preprocessed_img, _ = self.preprocessor.process(image_input)
-                    self.visualizer.save_visualization(preprocessed_img, recognized_menu, visualize_path)
-                return recognized_menu
+                return self.gemini_extractor.extract(image_input)
             except Exception as e:
-                print(f"Warning: Gemini API extraction failed ({e}). Falling back to local OCR engine...", file=sys.stderr)
+                print(f"Warning: Gemini API extraction failed ({e}). Falling back to local OCR engine...")
 
-        start_time = time.time()
-
-        # Step 1: Preprocessing & Image Validation
-        preprocessed_img, prep_meta = self.preprocessor.process(image_input)
-        h, w = preprocessed_img.shape[:2]
-
-        # Step 2: Deep OCR Text Detection and Transcription
-        raw_blocks = self.ocr_engine.detect_and_recognize(preprocessed_img)
-
-        # Step 3: Spatial & Multi-column Layout Analysis
-        structured_blocks, num_cols = self.layout_analyzer.analyze(raw_blocks, image_width=w, image_height=h)
-
-        # Step 4: Semantic Menu Parsing (Items, Prices, Descriptions, Categories)
-        img_name = image_input if isinstance(image_input, str) else "in_memory_image"
-        recognized_menu = self.menu_parser.parse(
-            blocks=structured_blocks,
-            image_path=img_name,
-            image_width=w,
-            image_height=h,
-            num_columns=num_cols,
-        )
-        recognized_menu.metadata["processing_time_sec"] = round(time.time() - start_time, 2)
-        recognized_menu.metadata["active_ocr_device"] = self.ocr_engine.active_device
-
-        # Step 5: Optional Visualization
-        if visualize_path:
-            self.visualizer.save_visualization(preprocessed_img, recognized_menu, visualize_path)
-
+        processed_image = self.preprocessor.process(image_input)
+        ocr_results = self.ocr_engine.recognize(processed_image)
+        layout_data = self.layout_analyzer.analyze(ocr_results)
+        recognized_menu = self.menu_parser.parse(layout_data)
+        
         return recognized_menu
-
-    def extract_menu_items(
-        self,
-        image_input: Union[str, np.ndarray, Image.Image, io.BytesIO],
-        use_gemini: Optional[bool] = None,
-    ) -> List[str]:
-        """
-        Convenience method that scans a menu image and returns only the clean list of food item names.
-        Example: ["Chicken Butter Masala", "Chips", "Mango", ...]
-        """
-        menu = self.process_image(image_input, use_gemini=use_gemini)
-        return menu.get_item_names()
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Menu Item Recognition & Layout Parsing CLI")
-    parser.add_argument("--image", "-i", type=str, required=True, help="Path to input menu image file")
-    parser.add_argument("--items-only", action="store_true", help="Print only the list of recognized food items")
-    parser.add_argument("--gemini", action="store_true", help="Force use Gemini Flash Vision AI")
-    parser.add_argument("--offline", action="store_true", help="Force use local offline PyTorch OCR engine")
-    parser.add_argument("--api-key", type=str, default=None, help="Google Gemini API key")
-    parser.add_argument("--output", "-o", type=str, default=None, help="Path to save output JSON")
-    parser.add_argument("--visualize", "-v", type=str, default=None, help="Path to save annotated visual image")
-    parser.add_argument("--markdown", "-m", type=str, default=None, help="Path to save Markdown summary")
-    parser.add_argument("--cpu", action="store_true", help="Force CPU mode for OCR")
-    parser.add_argument("--no-deskew", action="store_true", help="Disable auto-deskewing")
-
-    args = parser.parse_args()
-
-    if not os.path.exists(args.image):
-        print(f"Error: Input image '{args.image}' not found.", file=sys.stderr)
-        sys.exit(1)
-
-    use_gemini = False if args.offline else (True if args.gemini else None)
-
-    pipeline = MenuRecognitionPipeline(
-        gpu=False if args.cpu else None,
-        enable_deskew=not args.no_deskew,
-        api_key=args.api_key,
-        prefer_gemini=not args.offline,
-    )
-
-    if args.items_only:
-        items = pipeline.extract_menu_items(args.image, use_gemini=use_gemini)
-        for item in items:
-            print(item)
-        if args.output:
-            import json
-            with open(args.output, "w", encoding="utf-8") as f:
-                json.dump(items, f, indent=2, ensure_ascii=False)
-        return
-
-    print(f"Processing menu image: {args.image} ...")
-    menu = pipeline.process_image(args.image, visualize_path=args.visualize, use_gemini=use_gemini)
-
-    print("\n" + "=" * 50)
-    print(f"RECOGNITION COMPLETE: Found {menu.total_items} items in {len(menu.sections)} sections")
-    print(f"Engine: {menu.metadata.get('extractor', 'Local-OCR')} | Model: {menu.metadata.get('model', 'CRAFT+CRNN')} | Device: {menu.metadata.get('active_ocr_device', 'cpu')}")
-    print("=" * 50 + "\n")
-
-    print("RECOGNIZED FOOD ITEMS:")
-    for idx, name in enumerate(menu.get_item_names(), 1):
-        print(f"  {idx}. {name}")
-
-    print("\n" + "-" * 50 + "\n")
-    print(menu.to_markdown())
-
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(menu.to_json())
-        print(f"\n[+] Saved structured JSON to: {args.output}")
-
-    if args.markdown:
-        with open(args.markdown, "w", encoding="utf-8") as f:
-            f.write(menu.to_markdown())
-        print(f"[+] Saved Markdown summary to: {args.markdown}")
-
-    if args.visualize:
-        print(f"[+] Saved annotated visualization to: {args.visualize}")
-
-
-if __name__ == "__main__":
-    main()

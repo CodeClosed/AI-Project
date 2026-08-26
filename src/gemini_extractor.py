@@ -23,6 +23,45 @@ from .models import RecognizedMenu, MenuSection, MenuItem, BoundingBox
 logger = logging.getLogger(__name__)
 
 
+def tokenize_food_item(raw_name: str) -> List[str]:
+    """
+    Splits compound food strings (separated by commas, slashes, or 'and')
+    into individual clean food item strings.
+    """
+    if not raw_name:
+        return []
+    
+    # Remove parenthetical portions e.g. "(200 gm)", "(2 Nos.)", "(250 mL)"
+    text = re.sub(r'\([^)]*\)', '', raw_name)
+    
+
+    # Split by comma, slash, semicolon, or newline
+    parts = re.split(r'[,/;\n]', text)
+    
+    clean_items = []
+    for part in parts:
+        item = part.strip()
+        # Clean up leading/trailing punctuation or bullet noise
+        item = re.sub(r'^[\-\*\•\.]+', '', item).strip()
+        
+        # Filter out headers, times, or empty strings
+        if not item or item.upper() in ["BREAKFAST", "LUNCH", "SNACKS", "DINNER", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY", "NOTE"]:
+            continue
+            
+        # If item has ' and ' with multiple dishes, split cautiously if length is short
+        if ' and ' in item.lower() and not any(k in item.lower() for k in ['rice and', 'dal and', 'mac and']):
+            sub_parts = re.split(r'\s+and\s+', item, flags=re.IGNORECASE)
+            for sp in sub_parts:
+                sp_clean = sp.strip()
+                if sp_clean and len(sp_clean) > 1:
+                    clean_items.append(sp_clean.title())
+        else:
+            if len(item) > 1:
+                clean_items.append(item.title())
+                
+    return clean_items
+
+
 class GeminiMenuExtractor:
     """Extracts structured menu items, categories, and prices using Google Gemini Flash."""
 
@@ -74,51 +113,52 @@ class GeminiMenuExtractor:
     def _calculate_confidence(self, name: str, price: Optional[float], desc: Optional[str], section: Optional[str]) -> float:
         """
         Calibrates item extraction confidence based on completeness and semantic coherence.
-        Replaces artificial 1.0 confidence with a realistic score.
         """
-        score = 0.70
+        score = 0.75
         if name and len(name) >= 3:
-            score += 0.10
-        if price is not None and 0.5 <= price <= 5000:
             score += 0.10
         if desc and len(desc) > 5:
             score += 0.05
         if section and section.lower() not in ("general", "other", "unknown"):
-            score += 0.04
-        return min(0.98, max(0.40, score))
+            score += 0.05
+        return min(0.98, max(0.50, score))
 
     def extract_menu(self, image_input: Union[str, np.ndarray, Image.Image, io.BytesIO]) -> RecognizedMenu:
         """
-        Processes a restaurant menu image with Gemini Flash and returns a structured RecognizedMenu object.
+        Processes a restaurant or college mess menu image with Gemini Flash and returns a structured RecognizedMenu object.
         """
         b64_img, img_w, img_h = self._prepare_base64_image(image_input)
 
         prompt = """
-You are an expert culinary AI specializing in restaurant menu digitization.
-Analyze this menu image and extract ALL genuine food and beverage dishes with complete accuracy.
+You are an expert culinary AI specializing in menu digitization for restaurants and university mess menus.
+Analyze this menu image and extract ALL individual food and beverage items with complete accuracy.
 
-CRITICAL EXTRACTION RULES:
-1. Extract ALL REAL food & beverage dishes (starters, burgers, pizzas, rolls, sandwiches, mains, combos, sides, desserts, drinks).
-2. Group items into their proper section categories (e.g. Fries, Burgers, Rolls, Sandwiches, Chinese, Noodles, Appetizers, Entrées, Pasta, Dinner Specials, Combos, Desserts, Beverages).
-3. If an item name has stylized/misrecognized characters or OCR typos in the image, fix and return the CORRECT culinary spelling.
-4. Distinguish category headers from dish names (e.g., 'Burger', 'Sandwich', 'Roll', 'Fries', 'Bun', 'Appetizers', 'Entrées', 'Dinner Specials' are section categories, NOT food items).
-5. If an item has an add-on or customization note (e.g. '(with cheese additional Rs 10)'), attach it to the item's 'description' field.
-6. For combo meals (e.g. 'Chicken Burger Combo' with 'Burger, Fries and spl lemon juice'), set 'name' to the combo title and 'description' to the inclusions.
-7. Exclude all non-food noise (restaurant branding, slogans, logos, table numbers, phone numbers, addresses, GST/tax notices, opening hours, footer text).
+CRITICAL EXTRACTION & TABLE GRID RULES:
+1. IF THIS IS A TABLE/TIMETABLE GRID (e.g. Days across columns, Meal slots across rows):
+   - Treat EVERY CELL independently.
+   - NEVER read text horizontally across multiple columns into one combined item.
+   - Extract dishes individually cell by cell.
+2. DISH TOKENIZATION & SPLITTING:
+   - If a cell or line contains multiple items separated by commas, slashes (/), 'and', or newlines (e.g. 'Dosa, Sambhar, Chutney' or 'Veg Biryani/Egg Biryani'), EXTRACT EACH DISH AS A SEPARATE INDIVIDUAL ITEM IN THE JSON.
+3. EXCLUDE TABLE HEADERS & NOISE:
+   - Exclude column/row headers (e.g., 'Monday', 'Tuesday', 'Breakfast', 'Lunch', 'Snacks', 'Dinner', time ranges like '7:30 AM - 9:15 AM').
+   - Exclude document headers, notices, footer notes (e.g., 'SRM UNIVERSITY', 'NOTE:', 'THIS MENU WILL BE...').
+4. SPELLING FIXES:
+   - Fix OCR spelling errors (e.g. fix 'Tdly' to 'Idli', 'Pillka' to 'Phulka', 'Rajama' to 'Rajma', 'Wkk' to 'Milk').
 
 Return ONLY valid JSON with this exact structure:
 {
   "sections": [
     {
-      "category": "Category Title",
+      "category": "Section or Meal Name (e.g. Breakfast, Lunch, Snacks, Dinner, or General)",
       "items": [
         {
-          "name": "Exact Correct Food Name",
-          "price": 60.0,
-          "raw_price": "Rs 60",
-          "currency": "Rs",
-          "description": "Optional description or add-on details",
-          "dietary_tags": ["Vegetarian", "Spicy"]
+          "name": "Single Individual Food Item Name",
+          "price": null,
+          "raw_price": null,
+          "currency": null,
+          "description": "",
+          "dietary_tags": []
         }
       ]
     }
@@ -144,40 +184,45 @@ Return ONLY valid JSON with this exact structure:
             sec_items: List[MenuItem] = []
 
             for it_data in sec_data.get("items", []):
-                name = str(it_data.get("name", "")).strip()
-                if not name:
+                raw_name = str(it_data.get("name", "")).strip()
+                if not raw_name:
                     continue
 
-                item_key = (name.lower(), cat_title.lower())
-                if item_key in seen_items:
-                    continue
-                seen_items.add(item_key)
+                # Tokenize and split any compound items returned in raw_name
+                individual_names = tokenize_food_item(raw_name)
 
-                price_val = it_data.get("price")
-                if price_val is not None:
-                    try:
-                        price_val = float(price_val)
-                    except (ValueError, TypeError):
-                        price_val = None
+                for name in individual_names:
+                    item_key = name.lower()
+                    # Skip duplicate items across sections/cells to prevent multi-scoring bugs
+                    if item_key in seen_items:
+                        continue
+                    seen_items.add(item_key)
 
-                raw_price = it_data.get("raw_price")
-                currency = it_data.get("currency")
-                desc = it_data.get("description")
-                dietary = it_data.get("dietary_tags", []) or []
+                    price_val = it_data.get("price")
+                    if price_val is not None:
+                        try:
+                            price_val = float(price_val)
+                        except (ValueError, TypeError):
+                            price_val = None
 
-                conf = self._calculate_confidence(name, price_val, desc, cat_title)
+                    raw_price = it_data.get("raw_price")
+                    currency = it_data.get("currency")
+                    desc = it_data.get("description", "")
+                    dietary = it_data.get("dietary_tags", []) or []
 
-                menu_item = MenuItem(
-                    name=name,
-                    price=price_val,
-                    raw_price=raw_price,
-                    currency=currency,
-                    description=desc,
-                    section=cat_title,
-                    dietary_tags=dietary,
-                    confidence=conf,
-                )
-                sec_items.append(menu_item)
+                    conf = self._calculate_confidence(name, price_val, desc, cat_title)
+
+                    menu_item = MenuItem(
+                        name=name,
+                        price=price_val,
+                        raw_price=raw_price,
+                        currency=currency,
+                        description=desc,
+                        section=cat_title,
+                        dietary_tags=dietary,
+                        confidence=conf,
+                    )
+                    sec_items.append(menu_item)
 
             if sec_items:
                 sections.append(MenuSection(title=cat_title, items=sec_items))

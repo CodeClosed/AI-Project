@@ -34,3 +34,4 @@ htmlcov/
 # OCR weights & generated demo artifacts
 .EasyOCR/
 examples/output/
+.env
