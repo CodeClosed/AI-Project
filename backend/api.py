@@ -126,7 +126,7 @@ async def evaluate_recommendations(req: Dict[str, Any]):
     target_day = str(req.get("day") or "").strip().lower()
     target_meal = str(req.get("meal_type") or "").strip().lower()
 
-    # Slot specific food rules
+    # Slot-specific keywords to filter OCR list when items lack strict tags
     meal_allowed_keywords = {
         "breakfast": ["dosa", "idly", "upma", "poha", "puri", "chapathi", "paratha", "pongal", "bread", "butter", "jam", "tea", "coffee", "milk", "chutney", "sambar", "aloo besan", "boiled egg", "omelette", "muffin", "vada", "halwa"],
         "lunch": ["rice", "pulao", "biryani", "roti", "phulka", "chapathi", "dal", "sambar", "rasam", "curry", "subzi", "paneer", "chicken", "curd", "raita", "salad", "pappu", "fry", "khorma", "makhani"],
@@ -135,36 +135,39 @@ async def evaluate_recommendations(req: Dict[str, Any]):
     }
 
     clean_items = []
+    seen = set()
+
     for item in raw_items:
         item_name = ""
         item_day = ""
         item_meal = ""
 
         if isinstance(item, dict):
-          item_name = item.get("name") or item.get("label") or ""
-          item_day = str(item.get("day", "")).strip().lower()
-          item_meal = str(item.get("meal_type", "")).strip().lower()
+            item_name = item.get("name") or item.get("label") or ""
+            item_day = str(item.get("day", "")).strip().lower()
+            item_meal = str(item.get("meal_type", "")).strip().lower()
         else:
-          item_name = str(item)
+            item_name = str(item)
 
         item_name_clean = item_name.strip()
-        if not item_name_clean:
-          continue
-
-        # Day filtering if metadata exists
-        if target_day and item_day and target_day not in item_day:
-          continue
-
-        # Meal slot filtering if metadata exists
-        if target_meal and item_meal and target_meal not in item_meal:
-          continue
-
-        # Category sanity check for flat OCR lists (prevents Biryani in Breakfast)
-        allowed_kw = meal_allowed_keywords.get(target_meal, [])
-        if allowed_kw and not item_meal:
-          if not any(kw in item_name_clean.lower() for kw in allowed_kw):
+        if not item_name_clean or item_name_clean.lower() in seen:
             continue
 
+        # 1. Day filtering if structured metadata exists
+        if target_day and item_day and target_day not in item_day:
+            continue
+
+        # 2. Meal slot filtering if structured metadata exists
+        if target_meal and item_meal and target_meal not in item_meal:
+            continue
+
+        # 3. Keyword filtering for flat OCR lists (prevents Biryani in Breakfast)
+        allowed_kw = meal_allowed_keywords.get(target_meal, [])
+        if allowed_kw and not item_meal:
+            if not any(kw in item_name_clean.lower() for kw in allowed_kw):
+                continue
+
+        seen.add(item_name_clean.lower())
         clean_items.append(item_name_clean)
 
     if not clean_items:
@@ -176,47 +179,51 @@ async def evaluate_recommendations(req: Dict[str, Any]):
         }
         return {"success": True, "result": empty_payload, "recommendations": empty_payload}
 
-    # Group valid items for combo creation
-    bases = [i for i in clean_items if any(k in i.lower() for k in ["dosa", "idly", "chapathi", "roti", "phulka", "pulao", "rice", "pongal", "paratha", "puri", "bread", "kichidi"])]
-    mains = [i for i in clean_items if any(k in i.lower() for k in ["dal", "curry", "masala", "subzi", "paneer", "sambar", "channa", "rajma", "chicken", "pappu", "khorma", "makhani"])]
-    sides = [i for i in clean_items if any(k in i.lower() for k in ["chutney", "curd", "raita", "rasam", "salad", "buttermilk", "pickle"])]
+    # Format each individual dish as a standalone recommendation
+    recommendations = []
+    for dish in clean_items:
+        lower_name = dish.lower()
+        score = 88
+        tier = "GOOD"
+        flags = ["Matched Schedule"]
+        tips = "Supports steady energy levels."
 
-    if not bases:
-        bases = clean_items[:2]
-    if not mains:
-        mains = clean_items[2:4] if len(clean_items) >= 4 else clean_items
+        # Assign basic clinical tier scoring rules
+        if any(k in lower_name for k in ["fried", "pakoda", "samosa", "halwa", "bajji", "cake"]):
+            score = 45
+            tier = "BAD"
+            flags = ["High Calorie / Fried"]
+            tips = "Consume in moderation."
+        elif any(k in lower_name for k in ["paneer", "butter", "biryani"]):
+            score = 68
+            tier = "MEDIUM"
+            flags = ["Moderate Saturated Fats"]
+            tips = "Pair with fresh salad or fiber."
 
-    combos = []
-    seen = set()
+        recommendations.append({
+            "tier": tier,
+            "fit_score": score,
+            "dish_name": dish,
+            "price": "",
+            "summary_reason": f"Available for {target_day.capitalize()} {target_meal.capitalize()}.",
+            "green_flags": flags if tier == "GOOD" else [],
+            "red_flags": flags if tier != "GOOD" else [],
+            "allergen_warnings": [],
+            "customization_tips": tips
+        })
 
-    for base in bases:
-        for main in mains:
-            side = sides[0] if sides else "Chutney"
-            combo_name = f"{base} + {main} + {side}" if base != main else base
-
-            if combo_name in seen:
-                continue
-            seen.add(combo_name)
-
-            combos.append({
-                "tier": "GOOD",
-                "fit_score": 88,
-                "dish_name": combo_name,
-                "price": "",
-                "summary_reason": f"Slot-specific meal for {target_day.capitalize()} {target_meal.capitalize()}.",
-                "green_flags": ["Matched Schedule"],
-                "red_flags": [],
-                "allergen_warnings": [],
-                "customization_tips": "Sustained energy."
-            })
-
-    combos.sort(key=lambda x: x["fit_score"], reverse=True)
+    # Sort high-scoring individual items to the top
+    recommendations.sort(key=lambda x: x["fit_score"], reverse=True)
 
     result_data = {
-        "tier_counts": {"GOOD": len(combos), "MEDIUM": 0, "BAD": 0},
-        "all_recommendations": combos,
-        "total_items_evaluated": len(combos),
-        "top_pick": combos[0] if combos else None,
+        "tier_counts": {
+            "GOOD": sum(1 for r in recommendations if r["tier"] == "GOOD"),
+            "MEDIUM": sum(1 for r in recommendations if r["tier"] == "MEDIUM"),
+            "BAD": sum(1 for r in recommendations if r["tier"] == "BAD")
+        },
+        "all_recommendations": recommendations,
+        "total_items_evaluated": len(recommendations),
+        "top_pick": recommendations[0] if recommendations else None,
     }
 
     return {"success": True, "result": result_data, "recommendations": result_data}
