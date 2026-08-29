@@ -42,6 +42,11 @@ export async function generateHealthMatrix(profilePayload) {
 }
 
 export async function evaluateRecommendations(userMatrix, dishes, goodThreshold = 75, badThreshold = 45, apiKey = null) {
+  // Extract clean string names if dishes are objects
+  const itemsList = (dishes || []).map((dish) =>
+    typeof dish === 'string' ? dish : dish.name || dish.label || String(dish)
+  );
+
   const response = await fetch(`${API_BASE_URL}/api/recommend/evaluate`, {
     method: 'POST',
     headers: {
@@ -50,6 +55,7 @@ export async function evaluateRecommendations(userMatrix, dishes, goodThreshold 
     body: JSON.stringify({
       user_matrix: userMatrix,
       dishes: dishes,
+      items: itemsList, // Sends the required clean list to backend
       good_threshold: goodThreshold,
       bad_threshold: badThreshold,
       api_key: apiKey,

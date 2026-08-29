@@ -159,18 +159,40 @@ export default function App() {
   const runEvaluation = async (activeMatrix = userMatrix, activeDishes = dishes) => {
     const matrixToUse = activeMatrix || computeLocalMatrix(profile);
     if (!matrixToUse || activeDishes.length === 0) return;
+    
     setEvalLoading(true);
     try {
+      // 1. Extract string names safely whether activeDishes are objects or strings
+      const cleanDishes = activeDishes.map((dish) =>
+        typeof dish === 'string' ? dish : dish.name || dish.label || String(dish)
+      );
+
+      // 2. Call backend
       const data = await evaluateRecommendations(
         matrixToUse,
-        activeDishes,
+        cleanDishes,
         75,
         45,
         profile?.api_key
       );
-      if (data?.result) {
-        setEvalResult(data.result);
-      }
+
+      // 3. Normalize backend result to support both naming schemas
+      const rawRes = data?.result || data?.recommendations || data || {};
+      const t1 = rawRes.tier_1_optimal || rawRes.good || rawRes.tier_1 || [];
+      const t2 = rawRes.tier_2_moderate || rawRes.medium || rawRes.tier_2 || [];
+      const t3 = rawRes.tier_3_avoid || rawRes.bad || rawRes.tier_3 || [];
+
+      const normalizedResult = {
+        tier_1_optimal: t1,
+        tier_2_moderate: t2,
+        tier_3_avoid: t3,
+        good: t1,
+        medium: t2,
+        bad: t3,
+        ...rawRes,
+      };
+
+      setEvalResult(normalizedResult);
     } catch (err) {
       console.error('Recommendation evaluation failed:', err);
     } finally {
@@ -246,9 +268,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Workspace (Uncramped & Spacious) */}
+      {/* Main Workspace */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
-        {/* Section 1: Menu Upload (Left Image / Right Extracted Items Table) */}
+        {/* Section 1: Menu Upload */}
         <MenuUploadSection
           profile={profile}
           dishes={dishes}
@@ -261,7 +283,7 @@ export default function App() {
           setImagePreview={setImagePreview}
         />
 
-        {/* Section 2: 3-Tier Recommendation Tables (Unified Combined Table & Filter Tabs) */}
+        {/* Section 2: 3-Tier Recommendation Tables */}
         <RecommendationTableSection
           dishes={dishes}
           userMatrix={userMatrix}
@@ -271,7 +293,7 @@ export default function App() {
         />
       </main>
 
-      {/* Slide-over / Floating Account Drawer Modal */}
+      {/* Account Drawer Modal */}
       <AccountDrawerModal
         isOpen={isAccountModalOpen}
         onClose={() => setIsAccountModalOpen(false)}

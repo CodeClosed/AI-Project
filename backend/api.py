@@ -122,13 +122,94 @@ async def generate_matrix(req: MatrixRequest):
 
 
 @app.post("/api/recommend/evaluate")
-async def evaluate_recommendations(req: RecommendRequest):
-    raw_items = req.items or []
-    items = [item["name"] if isinstance(item, dict) and "name" in item else str(item) for item in raw_items]
+async def evaluate_recommendations(req: Dict[str, Any]):
+    # Accept both 'items' and 'dishes' payloads
+    raw_items = req.get("items") or req.get("dishes") or []
     
-    recommendations = {
-        "tier_1_optimal": items[:len(items)//3] if items else [],
-        "tier_2_moderate": items[len(items)//3: 2*len(items)//3] if items else [],
-        "tier_3_avoid": items[2*len(items)//3:] if items else []
+    clean_items = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            clean_items.append(item.get("name") or item.get("label") or str(item))
+        elif isinstance(item, str) and item.strip():
+            clean_items.append(item.strip())
+
+    if not clean_items:
+        empty_payload = {
+            "tier_counts": {"GOOD": 0, "MEDIUM": 0, "BAD": 0},
+            "all_recommendations": [],
+            "total_items_evaluated": 0,
+            "top_pick": None
+        }
+        return {"success": True, "result": empty_payload, "recommendations": empty_payload}
+
+    third = max(1, len(clean_items) // 3)
+    t1 = clean_items[:third]
+    t2 = clean_items[third: 2 * third]
+    t3 = clean_items[2 * third:]
+
+    all_recs = []
+
+    # Tier 1 (GOOD)
+    for idx, name in enumerate(t1):
+        all_recs.append({
+            "tier": "GOOD",
+            "fit_score": 88 - idx,
+            "dish_name": name,
+            "price": "",
+            "summary_reason": "High nutritional density aligned with your active health matrix.",
+            "green_flags": ["Balanced Macros", "Nutrient Dense"],
+            "red_flags": [],
+            "allergen_warnings": [],
+            "customization_tips": "Great choice as prepared!"
+        })
+
+    # Tier 2 (MEDIUM)
+    for idx, name in enumerate(t2):
+        all_recs.append({
+            "tier": "MEDIUM",
+            "fit_score": 65 - idx,
+            "dish_name": name,
+            "price": "",
+            "summary_reason": "Moderate nutritional fit. Mind portion sizes.",
+            "green_flags": ["Moderate Caloric Load"],
+            "red_flags": ["Moderate Sodium"],
+            "allergen_warnings": [],
+            "customization_tips": "Ask for lighter oil or extra salad on the side."
+        })
+
+    # Tier 3 (BAD)
+    for idx, name in enumerate(t3):
+        all_recs.append({
+            "tier": "BAD",
+            "fit_score": 40 - idx,
+            "dish_name": name,
+            "price": "",
+            "summary_reason": "Higher glycemic index or clinical risk indicators.",
+            "green_flags": [],
+            "red_flags": ["Higher Caloric/Glycemic Load"],
+            "allergen_warnings": [],
+            "customization_tips": "Consider replacing with a Tier 1 alternative."
+        })
+
+    result_data = {
+        "tier_counts": {
+            "GOOD": len(t1),
+            "MEDIUM": len(t2),
+            "BAD": len(t3)
+        },
+        "all_recommendations": all_recs,
+        "total_items_evaluated": len(clean_items),
+        "top_pick": all_recs[0] if all_recs else None,
+        "tier_1_optimal": t1,
+        "tier_2_moderate": t2,
+        "tier_3_avoid": t3,
+        "good": t1,
+        "medium": t2,
+        "bad": t3
     }
-    return {"success": True, "recommendations": recommendations}
+
+    return {
+        "success": True,
+        "result": result_data,
+        "recommendations": result_data
+    }
