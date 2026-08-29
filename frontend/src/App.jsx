@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Salad, ShieldCheck, User, Settings, Sparkles } from 'lucide-react';
+import { Salad, ShieldCheck, User, Settings, Sparkles, Calendar, Utensils } from 'lucide-react';
 import AccountDrawerModal from './components/AccountDrawerModal';
 import MenuUploadSection from './components/MenuUploadSection';
 import RecommendationTableSection from './components/RecommendationTableSection';
@@ -99,7 +99,6 @@ function computeLocalMatrix(p) {
 }
 
 export default function App() {
-  // 1. Persistent User Account Profile
   const [profile, setProfile] = useState(() => {
     try {
       const saved = localStorage.getItem('nutrimenu_account_profile');
@@ -113,17 +112,17 @@ export default function App() {
   const [loadingMatrix, setLoadingMatrix] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
-  // 2. Extracted Menu Dishes & OCR
   const [dishes, setDishes] = useState([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  // 3. Recommendation Evaluation
+  const [selectedDay, setSelectedDay] = useState('tuesday');
+  const [selectedMeal, setSelectedMeal] = useState('breakfast');
+
   const [evalResult, setEvalResult] = useState(null);
   const [evalLoading, setEvalLoading] = useState(false);
 
-  // Sync profile to localStorage and immediately refresh local matrix
   useEffect(() => {
     try {
       localStorage.setItem('nutrimenu_account_profile', JSON.stringify(profile));
@@ -131,7 +130,6 @@ export default function App() {
     setUserMatrix((prev) => prev || computeLocalMatrix(profile));
   }, [profile]);
 
-  // Sync health matrix with backend
   const syncMatrix = useCallback(async (currentProfile) => {
     setLoadingMatrix(true);
     try {
@@ -150,33 +148,42 @@ export default function App() {
     return fallback;
   }, []);
 
-  // Initial load
   useEffect(() => {
     syncMatrix(profile);
   }, []);
 
-  // Run Recommendation Matchmaker
-  const runEvaluation = async (activeMatrix = userMatrix, activeDishes = dishes) => {
+  const runEvaluation = async (
+    activeMatrix = userMatrix,
+    activeDishes = dishes,
+    day = selectedDay,
+    meal = selectedMeal
+  ) => {
     const matrixToUse = activeMatrix || computeLocalMatrix(profile);
     if (!matrixToUse || activeDishes.length === 0) return;
-    
+
     setEvalLoading(true);
     try {
-      // 1. Extract string names safely whether activeDishes are objects or strings
-      const cleanDishes = activeDishes.map((dish) =>
-        typeof dish === 'string' ? dish : dish.name || dish.label || String(dish)
-      );
+      // Send raw objects (preserving day & meal_type attributes) or strings
+      const payloadDishes = activeDishes.map((dish) => {
+        if (typeof dish === 'object' && dish !== null) {
+          return {
+            name: dish.name || dish.label || String(dish),
+            day: dish.day || '',
+            meal_type: dish.meal_type || dish.section || '',
+          };
+        }
+        return { name: String(dish), day: '', meal_type: '' };
+      });
 
-      // 2. Call backend
-      const data = await evaluateRecommendations(
-        matrixToUse,
-        cleanDishes,
-        75,
-        45,
-        profile?.api_key
-      );
+      const data = await evaluateRecommendations({
+        matrix: matrixToUse,
+        dishes: payloadDishes,
+        items: payloadDishes,
+        day: day,
+        meal_type: meal,
+        profile: profile,
+      });
 
-      // 3. Normalize backend result to support both naming schemas
       const rawRes = data?.result || data?.recommendations || data || {};
       const t1 = rawRes.tier_1_optimal || rawRes.good || rawRes.tier_1 || [];
       const t2 = rawRes.tier_2_moderate || rawRes.medium || rawRes.tier_2 || [];
@@ -200,33 +207,29 @@ export default function App() {
     }
   };
 
-  // When profile is saved in Modal, update matrix & re-run evaluation if dishes exist
   const handleSaveProfile = async () => {
     const updatedMatrix = await syncMatrix(profile);
     if (updatedMatrix && dishes.length > 0) {
-      runEvaluation(updatedMatrix, dishes);
+      runEvaluation(updatedMatrix, dishes, selectedDay, selectedMeal);
     }
   };
 
-  // Auto-run evaluation when dishes or userMatrix are updated
   useEffect(() => {
     if (dishes.length > 0) {
       const matrixToUse = userMatrix || computeLocalMatrix(profile);
-      runEvaluation(matrixToUse, dishes);
+      runEvaluation(matrixToUse, dishes, selectedDay, selectedMeal);
     } else {
       setEvalResult(null);
     }
-  }, [dishes, userMatrix]);
+  }, [dishes, userMatrix, selectedDay, selectedMeal]);
 
   const dietLabels = (profile.dietary_preferences || []).join(', ');
   const allergyLabels = (profile.allergies || []).join(', ');
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col justify-between selection:bg-emerald-500 selection:text-white font-sans">
-      {/* Top Navbar */}
       <header className="border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-sm">
               <Salad className="w-5 h-5 text-white font-bold" />
@@ -241,11 +244,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* Unified Single Account Profile Button */}
           <button
             onClick={() => setIsAccountModalOpen(true)}
-            title="Open Account & Health Matrix Settings"
-            className="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-slate-100/80 transition-all text-xs font-semibold text-slate-800 shadow-xs active:scale-[0.96] cursor-pointer group"
+            className="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-slate-100/80 transition-all text-xs font-semibold text-slate-800 shadow-xs cursor-pointer"
           >
             <div className="relative w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
               <User className="w-4 h-4" />
@@ -268,9 +269,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Workspace */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
-        {/* Section 1: Menu Upload */}
         <MenuUploadSection
           profile={profile}
           dishes={dishes}
@@ -283,17 +282,62 @@ export default function App() {
           setImagePreview={setImagePreview}
         />
 
-        {/* Section 2: 3-Tier Recommendation Tables */}
+        {/* Slot Selection Control Bar */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-emerald-600" />
+              <label className="text-xs font-bold uppercase text-slate-500 tracking-wider">DAY:</label>
+              <select
+                value={selectedDay}
+                onChange={(e) => setSelectedDay(e.target.value)}
+                className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <option value="monday">Monday</option>
+                <option value="tuesday">Tuesday</option>
+                <option value="wednesday">Wednesday</option>
+                <option value="thursday">Thursday</option>
+                <option value="friday">Friday</option>
+                <option value="saturday">Saturday</option>
+                <option value="sunday">Sunday</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Utensils className="w-4 h-4 text-emerald-600" />
+              <label className="text-xs font-bold uppercase text-slate-500 tracking-wider">MEAL SLOT:</label>
+              <select
+                value={selectedMeal}
+                onChange={(e) => setSelectedMeal(e.target.value)}
+                className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <option value="breakfast">Breakfast</option>
+                <option value="lunch">Lunch</option>
+                <option value="snacks">Snacks</option>
+                <option value="dinner">Dinner</option>
+              </select>
+            </div>
+          </div>
+
+          <button
+            onClick={() => runEvaluation(userMatrix, dishes, selectedDay, selectedMeal)}
+            disabled={evalLoading || dishes.length === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-xl flex items-center gap-2 transition cursor-pointer shadow-sm"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>{evalLoading ? 'Evaluating...' : `Evaluate ${selectedDay.toUpperCase()} ${selectedMeal.toUpperCase()}`}</span>
+          </button>
+        </div>
+
         <RecommendationTableSection
           dishes={dishes}
           userMatrix={userMatrix}
           evalResult={evalResult}
           evalLoading={evalLoading}
-          onRunEvaluation={() => runEvaluation(userMatrix, dishes)}
+          onRunEvaluation={() => runEvaluation(userMatrix, dishes, selectedDay, selectedMeal)}
         />
       </main>
 
-      {/* Account Drawer Modal */}
       <AccountDrawerModal
         isOpen={isAccountModalOpen}
         onClose={() => setIsAccountModalOpen(false)}
@@ -304,14 +348,13 @@ export default function App() {
         loadingMatrix={loadingMatrix}
       />
 
-      {/* Footer Disclaimer */}
       <footer className="border-t border-slate-200/80 bg-white py-6 text-center text-xs text-slate-500">
         <div className="max-w-4xl mx-auto px-4">
           <p className="flex items-center justify-center gap-1.5 mb-1 text-slate-700 font-semibold">
             <ShieldCheck className="w-4 h-4 text-emerald-600" /> Medical & Nutritional Guidance Disclaimer
           </p>
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            Recommendations are computational estimates based on user biometric inputs and published clinical nutritional literature. This application is not a medical device and does not substitute for clinical advice from a licensed medical professional or registered dietitian.
+            Recommendations are computational estimates based on user biometric inputs and published clinical nutritional literature.
           </p>
         </div>
       </footer>

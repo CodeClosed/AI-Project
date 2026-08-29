@@ -41,31 +41,23 @@ export async function generateHealthMatrix(profilePayload) {
   return await response.json();
 }
 
-export async function evaluateRecommendations(userMatrix, dishes, goodThreshold = 75, badThreshold = 45, apiKey = null) {
-  // Extract clean string names if dishes are objects
-  const itemsList = (dishes || []).map((dish) =>
-    typeof dish === 'string' ? dish : dish.name || dish.label || String(dish)
-  );
 
-  const response = await fetch(`${API_BASE_URL}/api/recommend/evaluate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      user_matrix: userMatrix,
-      dishes: dishes,
-      items: itemsList, // Sends the required clean list to backend
-      good_threshold: goodThreshold,
-      bad_threshold: badThreshold,
-      api_key: apiKey,
-    }),
-  });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Recommendation evaluation failed with status ${response.status}`);
+export async function evaluateRecommendations(payload) {
+  try {
+    const res = await fetch("http://localhost:8000/api/recommend/evaluate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(`Server returned status ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("API call error:", err);
+    return null;
   }
-
-  return await response.json();
 }
