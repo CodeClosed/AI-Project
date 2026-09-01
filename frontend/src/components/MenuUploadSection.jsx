@@ -52,7 +52,7 @@ export default function MenuUploadSection({
     setOcrLoading(true);
 
     try {
-      // Pass Gemini API key from user profile (or server env)
+      // Pass optional API key from user profile (or server env)
       const data = await uploadMenuImage(file, profile?.api_key);
       if (data.dishes && data.dishes.length > 0) {
         setDishes(data.dishes);
@@ -124,7 +124,7 @@ export default function MenuUploadSection({
           <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
             <span>Upload your menu image on the left.</span>
             <span className="text-emerald-700 font-semibold flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-emerald-600" /> Powered by Gemini Vision
+              <Sparkles className="w-3 h-3 text-emerald-600" /> Powered by Gemini 3.7 Flash Vision AI
             </span>
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function MenuUploadSection({
                     <Loader2 className="w-9 h-9 text-emerald-600 animate-spin" />
                     <Sparkles className="w-4 h-4 text-emerald-500 absolute -top-1 -right-1" />
                   </div>
-                  <span className="text-sm font-bold text-slate-900">Gemini Vision AI Analyzing Menu...</span>
+                  <span className="text-sm font-bold text-slate-900">Deep Vision OCR Analyzing Menu...</span>
                   <span className="text-xs text-slate-500 mt-1">Zero-shot dish extraction & typo correction</span>
                 </div>
               )}
@@ -227,7 +227,7 @@ export default function MenuUploadSection({
                     Browse File
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-emerald-500" /> Multi-modal Gemini Vision Engine
+                    <Sparkles className="w-3 h-3 text-emerald-500" /> Multi-modal Vision AI Engine
                   </span>
                 </div>
               )}

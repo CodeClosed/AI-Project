@@ -11,8 +11,8 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 
-from .config import get_gemini_api_key, get_gemini_model_name
-from .gemini_client import GeminiClient, GeminiAPIError
+from .config import get_openrouter_api_key, get_openrouter_model_name
+from .ai_client import AIClient, AIClientError
 
 logger = logging.getLogger(__name__)
 
@@ -255,29 +255,31 @@ class AIMatrixGenerator:
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None,
+        ai_client: Optional[AIClient] = None,
+        gemini_client: Optional[AIClient] = None,
     ):
-        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.ai_client = ai_client or gemini_client or AIClient(api_key=api_key, model_name=model_name)
+        self.gemini_client = self.ai_client
 
     def is_available(self) -> bool:
-        return self.gemini_client.is_available()
+        return self.ai_client.is_available()
 
     def generate(self, user_input: Union[Dict[str, Any], str], user_id: Optional[str] = None) -> UserNutritionalMatrix:
         """
-        Generates a complete UserNutritionalMatrix from either a dictionary of attributes
-        or a natural language text description of the user.
+        Synthesizes a standardized UserNutritionalMatrix from raw inputs (dict or natural language bio).
+        Uses AI when available, otherwise falls back to deterministic mathematical calculations.
         """
         if self.is_available():
             try:
                 return self._generate_ai(user_input, user_id)
             except Exception as e:
-                logger.warning("[AIMatrixGenerator] AI generation failed (%s), falling back to deterministic baseline calculator.", e)
+                logger.warning("[AIMatrixGenerator] AI synthesis failed (%s), falling back to deterministic baseline.", e)
                 return self._generate_deterministic(user_input, user_id)
         else:
             return self._generate_deterministic(user_input, user_id)
 
     def _generate_ai(self, user_input: Union[Dict[str, Any], str], user_id: Optional[str] = None) -> UserNutritionalMatrix:
-        """Invokes Gemini Flash in JSON mode to synthesize the complete matrix."""
+        """Invokes AI model in JSON mode to synthesize the complete matrix."""
         input_str = json.dumps(user_input, indent=2) if isinstance(user_input, dict) else str(user_input)
 
         prompt = f"""
@@ -386,10 +388,10 @@ Return ONLY valid JSON matching this exact structure:
   "exclusion_mask": ["peanuts", "meat", "poultry", "fish", "shellfish"]
 }}
 """
-        response_json = self.gemini_client.generate_json(prompt, temperature=0.15)
-        return self._parse_json_matrix(response_json, user_id=user_id, model_name=self.gemini_client.model_name)
+        response_json = self.ai_client.generate_json(prompt, temperature=0.15)
+        return self._parse_json_matrix(response_json, user_id=user_id, model_name=self.ai_client.model_name)
 
-    def _parse_json_matrix(self, data: Dict[str, Any], user_id: Optional[str] = None, model_name: str = "Gemini-Flash") -> UserNutritionalMatrix:
+    def _parse_json_matrix(self, data: Dict[str, Any], user_id: Optional[str] = None, model_name: str = "Vision-AI") -> UserNutritionalMatrix:
         """Constructs UserNutritionalMatrix object from validated JSON."""
         mt = data.get("metabolic_targets", {})
         metabolic_obj = MetabolicTargets(
@@ -447,7 +449,7 @@ Return ONLY valid JSON matching this exact structure:
             nutritional_guardrails=guardrails_obj,
             food_group_weights=fg_weights,
             exclusion_mask=data.get("exclusion_mask", []),
-            metadata={"engine": "Google-Gemini-AI", "model": model_name}
+            metadata={"engine": "NutriMenu-AI", "model": model_name}
         )
 
     def _generate_deterministic(self, user_input: Union[Dict[str, Any], str], user_id: Optional[str] = None) -> UserNutritionalMatrix:

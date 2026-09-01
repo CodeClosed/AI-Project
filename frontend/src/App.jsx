@@ -117,9 +117,6 @@ export default function App() {
   const [ocrError, setOcrError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  const [selectedDay, setSelectedDay] = useState('tuesday');
-  const [selectedMeal, setSelectedMeal] = useState('breakfast');
-
   const [evalResult, setEvalResult] = useState(null);
   const [evalLoading, setEvalLoading] = useState(false);
 
@@ -154,42 +151,41 @@ export default function App() {
 
   const runEvaluation = async (
     activeMatrix = userMatrix,
-    activeDishes = dishes,
-    day = selectedDay,
-    meal = selectedMeal
+    activeDishes = dishes
   ) => {
     const matrixToUse = activeMatrix || computeLocalMatrix(profile);
     if (!matrixToUse || activeDishes.length === 0) return;
 
     setEvalLoading(true);
     try {
-      // Send raw objects (preserving day & meal_type attributes) or strings
       const payloadDishes = activeDishes.map((dish) => {
         if (typeof dish === 'object' && dish !== null) {
           return {
             name: dish.name || dish.label || String(dish),
-            day: dish.day || '',
-            meal_type: dish.meal_type || dish.section || '',
+            price: dish.price || '',
+            description: dish.description || '',
+            tags: dish.tags || [],
           };
         }
-        return { name: String(dish), day: '', meal_type: '' };
+        return { name: String(dish), price: '', description: '', tags: [] };
       });
 
       const data = await evaluateRecommendations({
         matrix: matrixToUse,
         dishes: payloadDishes,
         items: payloadDishes,
-        day: day,
-        meal_type: meal,
         profile: profile,
       });
 
       const rawRes = data?.result || data?.recommendations || data || {};
-      const t1 = rawRes.tier_1_optimal || rawRes.good || rawRes.tier_1 || [];
-      const t2 = rawRes.tier_2_moderate || rawRes.medium || rawRes.tier_2 || [];
-      const t3 = rawRes.tier_3_avoid || rawRes.bad || rawRes.tier_3 || [];
+      const t1 = rawRes.good_items || rawRes.tier_1_optimal || rawRes.good || [];
+      const t2 = rawRes.medium_items || rawRes.tier_2_moderate || rawRes.medium || [];
+      const t3 = rawRes.bad_items || rawRes.tier_3_avoid || rawRes.bad || [];
 
       const normalizedResult = {
+        good_items: t1,
+        medium_items: t2,
+        bad_items: t3,
         tier_1_optimal: t1,
         tier_2_moderate: t2,
         tier_3_avoid: t3,
@@ -210,18 +206,18 @@ export default function App() {
   const handleSaveProfile = async () => {
     const updatedMatrix = await syncMatrix(profile);
     if (updatedMatrix && dishes.length > 0) {
-      runEvaluation(updatedMatrix, dishes, selectedDay, selectedMeal);
+      runEvaluation(updatedMatrix, dishes);
     }
   };
 
   useEffect(() => {
     if (dishes.length > 0) {
       const matrixToUse = userMatrix || computeLocalMatrix(profile);
-      runEvaluation(matrixToUse, dishes, selectedDay, selectedMeal);
+      runEvaluation(matrixToUse, dishes);
     } else {
       setEvalResult(null);
     }
-  }, [dishes, userMatrix, selectedDay, selectedMeal]);
+  }, [dishes, userMatrix]);
 
   const dietLabels = (profile.dietary_preferences || []).join(', ');
   const allergyLabels = (profile.allergies || []).join(', ');
@@ -239,7 +235,7 @@ export default function App() {
                 NutriMenu <span className="text-emerald-600">AI</span>
               </span>
               <span className="text-[10px] text-slate-500 block leading-none font-semibold">
-                Clinical Menu Intelligence & Matchmaker
+                Clinical 3-Tier Food Recommendation Engine
               </span>
             </div>
           </div>
@@ -282,59 +278,13 @@ export default function App() {
           setImagePreview={setImagePreview}
         />
 
-        {/* Slot Selection Control Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-6">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-emerald-600" />
-              <label className="text-xs font-bold uppercase text-slate-500 tracking-wider">DAY:</label>
-              <select
-                value={selectedDay}
-                onChange={(e) => setSelectedDay(e.target.value)}
-                className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-              >
-                <option value="monday">Monday</option>
-                <option value="tuesday">Tuesday</option>
-                <option value="wednesday">Wednesday</option>
-                <option value="thursday">Thursday</option>
-                <option value="friday">Friday</option>
-                <option value="saturday">Saturday</option>
-                <option value="sunday">Sunday</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Utensils className="w-4 h-4 text-emerald-600" />
-              <label className="text-xs font-bold uppercase text-slate-500 tracking-wider">MEAL SLOT:</label>
-              <select
-                value={selectedMeal}
-                onChange={(e) => setSelectedMeal(e.target.value)}
-                className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-              >
-                <option value="breakfast">Breakfast</option>
-                <option value="lunch">Lunch</option>
-                <option value="snacks">Snacks</option>
-                <option value="dinner">Dinner</option>
-              </select>
-            </div>
-          </div>
-
-          <button
-            onClick={() => runEvaluation(userMatrix, dishes, selectedDay, selectedMeal)}
-            disabled={evalLoading || dishes.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-xl flex items-center gap-2 transition cursor-pointer shadow-sm"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>{evalLoading ? 'Evaluating...' : `Evaluate ${selectedDay.toUpperCase()} ${selectedMeal.toUpperCase()}`}</span>
-          </button>
-        </div>
-
         <RecommendationTableSection
           dishes={dishes}
           userMatrix={userMatrix}
+          userProfile={profile}
           evalResult={evalResult}
           evalLoading={evalLoading}
-          onRunEvaluation={() => runEvaluation(userMatrix, dishes, selectedDay, selectedMeal)}
+          onRunEvaluation={() => runEvaluation(userMatrix, dishes)}
         />
       </main>
 

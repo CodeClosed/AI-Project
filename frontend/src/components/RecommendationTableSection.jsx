@@ -12,23 +12,35 @@ import {
   Play,
   Loader2,
   ChevronDown,
+  ChevronUp,
   FileSpreadsheet,
   FileText,
   FileCode,
   Printer,
   File,
+  Layers,
+  Table,
+  Activity,
+  Heart,
+  Flame,
+  ShieldCheck,
+  Zap,
+  Info,
 } from 'lucide-react';
 
 export default function RecommendationTableSection({
   dishes,
   userMatrix,
+  userProfile,
   evalResult,
   evalLoading,
   onRunEvaluation,
 }) {
+  const [viewMode, setViewMode] = useState('STACKED'); // 'STACKED' | 'TABLE'
   const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' | 'GOOD' | 'MEDIUM' | 'BAD'
   const [searchQuery, setSearchQuery] = useState('');
   const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [isMatrixExpanded, setIsMatrixExpanded] = useState(true);
   const dropdownRef = useRef(null);
 
   // Close dropdown on outside click
@@ -42,24 +54,45 @@ export default function RecommendationTableSection({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const counts = evalResult?.tier_counts || { GOOD: 0, MEDIUM: 0, BAD: 0 };
-  const allRecs = evalResult?.all_recommendations || [];
+  const counts = evalResult?.tier_counts || {
+    GOOD: (evalResult?.good_items || []).length,
+    MEDIUM: (evalResult?.medium_items || []).length,
+    BAD: (evalResult?.bad_items || []).length,
+  };
+  
+  const allRecs = evalResult?.all_recommendations || [
+    ...(evalResult?.good_items || []),
+    ...(evalResult?.medium_items || []),
+    ...(evalResult?.bad_items || []),
+  ];
 
-  const filtered = allRecs.filter((item) => {
-    if (activeTab !== 'ALL' && item.tier !== activeTab) {
-      return false;
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const matchName = item.dish_name.toLowerCase().includes(q);
+  const goodRecs = evalResult?.good_items || allRecs.filter(r => r.tier === 'GOOD');
+  const mediumRecs = evalResult?.medium_items || allRecs.filter(r => r.tier === 'MEDIUM');
+  const badRecs = evalResult?.bad_items || allRecs.filter(r => r.tier === 'BAD');
+
+  const filterList = (list) => {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase().trim();
+    return list.filter((item) => {
+      const matchName = (item.dish_name || '').toLowerCase().includes(q);
       const matchSummary = (item.summary_reason || '').toLowerCase().includes(q);
       const matchFlags = [...(item.green_flags || []), ...(item.red_flags || [])].some((f) =>
         f.toLowerCase().includes(q)
       );
-      return matchName || matchSummary || matchFlags;
-    }
-    return true;
-  });
+      const matchTips = (item.customization_tips || '').toLowerCase().includes(q);
+      return matchName || matchSummary || matchFlags || matchTips;
+    });
+  };
+
+  const filteredAll = filterList(
+    activeTab === 'ALL'
+      ? allRecs
+      : allRecs.filter((item) => item.tier === activeTab)
+  );
+
+  const filteredGood = filterList(goodRecs);
+  const filteredMedium = filterList(mediumRecs);
+  const filteredBad = filterList(badRecs);
 
   const triggerDownload = (content, filename, mimeType) => {
     const blob = new Blob([content], { type: mimeType });
@@ -77,15 +110,16 @@ export default function RecommendationTableSection({
     const jsonStr = JSON.stringify(
       {
         exported_at: new Date().toISOString(),
+        referenced_matrix: userMatrix,
         metadata: evalResult.metadata || {},
-        tier_counts: evalResult.tier_counts,
+        tier_counts: counts,
         top_pick: evalResult.top_pick,
-        recommendations: evalResult.all_recommendations,
+        recommendations: allRecs,
       },
       null,
       2
     );
-    triggerDownload(jsonStr, 'nutrimenu_recommendations.json', 'application/json');
+    triggerDownload(jsonStr, 'nutrimenu_3tier_recommendations.json', 'application/json');
   };
 
   // 2. CSV Export
@@ -121,17 +155,18 @@ export default function RecommendationTableSection({
     ]);
 
     const csvContent = [headers.map(escapeCsv).join(','), ...rows.map((r) => r.join(','))].join('\r\n');
-    triggerDownload(csvContent, 'nutrimenu_recommendations.csv', 'text/csv;charset=utf-8;');
+    triggerDownload(csvContent, 'nutrimenu_3tier_recommendations.csv', 'text/csv;charset=utf-8;');
   };
 
   // 3. Markdown Report Export
   const exportMarkdown = () => {
     if (!evalResult) return;
     const dateStr = new Date().toLocaleDateString();
-    let md = `# 🥗 NutriMenu AI — Clinical Recommendation Report\n\n`;
+    let md = `# 🥗 NutriMenu AI — Clinical 3-Tier Recommendation Report\n\n`;
     md += `**Generated Date**: ${dateStr}\n`;
-    md += `**Total Dishes Evaluated**: ${evalResult.total_items_evaluated}\n\n`;
-    md += `### 📊 Summary Counts\n`;
+    md += `**User Context**: ${userMatrix?.user_summary || 'Custom Health Profile'}\n`;
+    md += `**Total Dishes Evaluated**: ${allRecs.length}\n\n`;
+    md += `### 📊 Tier Summary\n`;
     md += `- 🟢 **Tier 1 (GOOD)**: ${counts.GOOD} items\n`;
     md += `- 🟡 **Tier 2 (MEDIUM)**: ${counts.MEDIUM} items\n`;
     md += `- 🔴 **Tier 3 (BAD)**: ${counts.BAD} items\n\n`;
@@ -142,8 +177,8 @@ export default function RecommendationTableSection({
       md += `_${evalResult.top_pick.summary_reason}_\n\n`;
     }
 
-    md += `## 📋 Recommendation Table\n\n`;
-    md += `| Tier | Score | Dish Name | Price | Clinical Assessment | Flags & Warnings | Chef Tip |\n`;
+    md += `## 📋 3-Tier Classification Table\n\n`;
+    md += `| Tier | Score | Dish Name | Price | Clinical Assessment | Nutritional Flags | Chef Tip |\n`;
     md += `| :--- | :---: | :--- | :---: | :--- | :--- | :--- |\n`;
 
     allRecs.forEach((r) => {
@@ -157,9 +192,9 @@ export default function RecommendationTableSection({
       md += `| ${tierBadge} | ${r.fit_score}/100 | **${r.dish_name}** | ${r.price || '-'} | ${r.summary_reason} | ${flags || '-'} | ${r.customization_tips || '-'} |\n`;
     });
 
-    md += `\n---\n*Disclaimer: NutriMenu AI recommendations are computational estimates based on personal biometric inputs. Not medical advice.*`;
+    md += `\n---\n*Disclaimer: NutriMenu AI recommendations are computational estimates based on personal biometric inputs and health matrices. Not medical advice.*`;
 
-    triggerDownload(md, 'nutrimenu_recommendations.md', 'text/markdown');
+    triggerDownload(md, 'nutrimenu_3tier_recommendations.md', 'text/markdown');
   };
 
   // 4. HTML Printable Report Export
@@ -204,7 +239,7 @@ export default function RecommendationTableSection({
 <html>
 <head>
   <meta charset="utf-8">
-  <title>NutriMenu AI — Clinical Recommendation Report</title>
+  <title>NutriMenu AI — Clinical 3-Tier Recommendation Report</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #FFFFFF; color: #0F172A; margin: 40px; line-height: 1.5; }
     h1 { font-size: 24px; color: #0F172A; margin-bottom: 4px; }
@@ -217,8 +252,8 @@ export default function RecommendationTableSection({
   </style>
 </head>
 <body>
-  <h1>🥗 NutriMenu AI — Clinical Recommendation Report</h1>
-  <div class="meta">Generated: ${dateStr} • Total Items Evaluated: ${evalResult.total_items_evaluated}</div>
+  <h1>🥗 NutriMenu AI — Clinical 3-Tier Recommendation Report</h1>
+  <div class="meta">Generated: ${dateStr} • Total Items Evaluated: ${allRecs.length} • Context: ${userMatrix?.user_summary || ''}</div>
   
   <div class="summary">
     <div class="card" style="background:#ECFDF5; border-color:#A7F3D0;"><div style="font-size:20px; font-weight:bold; color:#059669;">${counts.GOOD}</div><div style="font-size:11px; color:#047857;">🟢 Tier 1: Good</div></div>
@@ -247,7 +282,7 @@ export default function RecommendationTableSection({
 </body>
 </html>`;
 
-    triggerDownload(htmlContent, 'nutrimenu_recommendations.html', 'text/html');
+    triggerDownload(htmlContent, 'nutrimenu_3tier_recommendations.html', 'text/html');
   };
 
   // 5. Plain Text Summary Export
@@ -255,8 +290,9 @@ export default function RecommendationTableSection({
     if (!evalResult) return;
     const dateStr = new Date().toLocaleDateString();
     let txt = `====================================================\n`;
-    txt += `  NUTRIMENU AI - FOOD RECOMMENDATIONS SUMMARY\n`;
+    txt += `  NUTRIMENU AI - 3-TIER FOOD RECOMMENDATIONS REPORT\n`;
     txt += `  Generated: ${dateStr}\n`;
+    txt += `  Context: ${userMatrix?.user_summary || ''}\n`;
     txt += `====================================================\n\n`;
     txt += `Summary Counts:\n`;
     txt += `  - 🟢 Tier 1 (GOOD):   ${counts.GOOD}\n`;
@@ -265,16 +301,114 @@ export default function RecommendationTableSection({
 
     allRecs.forEach((r, idx) => {
       txt += `[${r.tier}] ${idx + 1}. ${r.dish_name} (${r.fit_score}/100) ${r.price || ''}\n`;
-      txt += `   Reason: "${r.summary_reason}"\n`;
-      if (r.allergen_warnings?.length) txt += `   ⛔ Allergen: ${r.allergen_warnings.join(', ')}\n`;
-      if (r.green_flags?.length) txt += `   🌿 Good: ${r.green_flags.join(', ')}\n`;
-      if (r.red_flags?.length) txt += `   ⚠️ Warning: ${r.red_flags.join(', ')}\n`;
-      if (r.customization_tips) txt += `   💡 Tip: ${r.customization_tips}\n`;
+      txt += `   Clinical Assessment: "${r.summary_reason}"\n`;
+      if (r.allergen_warnings?.length) txt += `   ⛔ Allergen Warning: ${r.allergen_warnings.join(', ')}\n`;
+      if (r.green_flags?.length) txt += `   🌿 Green Flags: ${r.green_flags.join(', ')}\n`;
+      if (r.red_flags?.length) txt += `   ⚠️ Red Flags: ${r.red_flags.join(', ')}\n`;
+      if (r.customization_tips) txt += `   💡 Chef Tip: ${r.customization_tips}\n`;
       txt += `\n`;
     });
 
-    triggerDownload(txt, 'nutrimenu_recommendations.txt', 'text/plain');
+    triggerDownload(txt, 'nutrimenu_3tier_recommendations.txt', 'text/plain');
   };
+
+  // Render Card Item
+  const renderDishItem = (item, idx) => {
+    const isGood = item.tier === 'GOOD';
+    const isMedium = item.tier === 'MEDIUM';
+
+    const badgeClass = isGood
+      ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+      : isMedium
+      ? 'bg-amber-100 text-amber-900 border border-amber-300'
+      : 'bg-rose-100 text-rose-900 border border-rose-300';
+
+    const borderClass = isGood
+      ? 'border-emerald-200 hover:border-emerald-400 bg-white'
+      : isMedium
+      ? 'border-amber-200 hover:border-amber-400 bg-white'
+      : 'border-rose-200 hover:border-rose-400 bg-white';
+
+    return (
+      <div
+        key={idx}
+        className={`p-4 rounded-2xl border ${borderClass} shadow-xs transition-all hover:shadow-md flex flex-col justify-between gap-3`}
+      >
+        <div className="space-y-2">
+          {/* Header row: Name, price, and score badge */}
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="font-bold text-slate-900 text-sm leading-snug">{item.dish_name}</div>
+              {item.price && (
+                <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-emerald-800 border border-slate-200 tabular-nums">
+                  {item.price}
+                </span>
+              )}
+            </div>
+            <div className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${badgeClass}`}>
+              {isGood ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+              ) : isMedium ? (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+              ) : (
+                <XCircle className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
+              )}
+              <span className="tabular-nums font-mono">{item.fit_score}/100</span>
+            </div>
+          </div>
+
+          {/* Clinical Assessment Reason */}
+          <p className="text-xs text-slate-700 leading-relaxed italic bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+            "{item.summary_reason}"
+          </p>
+
+          {/* Allergen & Dietary Warnings */}
+          {item.allergen_warnings && item.allergen_warnings.length > 0 && (
+            <div className="px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-900 border border-rose-200 text-[11px] font-bold flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span>⛔ {item.allergen_warnings.join(', ')}</span>
+            </div>
+          )}
+
+          {/* Green & Red Flags */}
+          <div className="flex flex-wrap gap-1 pt-1">
+            {(item.green_flags || []).map((flag, i) => (
+              <span
+                key={i}
+                className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold flex items-center gap-0.5"
+              >
+                <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> {flag}
+              </span>
+            ))}
+            {(item.red_flags || []).map((flag, i) => (
+              <span
+                key={i}
+                className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-semibold"
+              >
+                ⚠️ {flag}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Customization Tip */}
+        {item.customization_tips && (
+          <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-700">
+            <div className="p-2 rounded-xl bg-amber-50/90 border border-amber-200 text-slate-800 flex items-start gap-1.5">
+              <Lightbulb className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-amber-900">Chef's Advice:</span> {item.customization_tips}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const metabolic = userMatrix?.metabolic_targets;
+  const guardrails = userMatrix?.nutritional_guardrails;
+  const risks = userMatrix?.clinical_risk_weights;
 
   return (
     <section className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-sm space-y-6">
@@ -282,10 +416,10 @@ export default function RecommendationTableSection({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            3-Tier Food Recommendations & Matchmaker Engine
+            <Layers className="w-5 h-5 text-emerald-600" /> 3-Tier Food Recommendation System
           </h2>
-          <p className="text-xs text-slate-500">
-            Evaluates all menu items against your active health matrix and classifies them into Good, Medium, Bad, and Unified tables.
+          <p className="text-xs text-slate-500 mt-0.5">
+            Evaluates all available menu items against your active metabolic health matrix and classifies them into stacked Good, Medium, and Bad tiers.
           </p>
         </div>
 
@@ -311,16 +445,97 @@ export default function RecommendationTableSection({
         </button>
       </div>
 
+      {/* Referenced Health Matrix Card */}
+      {userMatrix && (
+        <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 transition-all">
+          <div className="flex items-center justify-between cursor-pointer" onClick={() => setIsMatrixExpanded(!isMatrixExpanded)}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <Activity className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-900 uppercase tracking-wider block">
+                  Referenced Health Matrix & Personal Constraints
+                </span>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  {userMatrix.user_summary || 'Active user biometric and clinical profile'}
+                </span>
+              </div>
+            </div>
+            <button className="text-slate-400 hover:text-slate-600 p-1">
+              {isMatrixExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {isMatrixExpanded && (
+            <div className="mt-4 pt-3 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              {/* Target Calories */}
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">
+                  <Flame className="w-3.5 h-3.5 text-amber-500" /> Caloric Target
+                </div>
+                <div className="text-base font-black text-slate-900">
+                  {metabolic ? `${Math.round(metabolic.target_calories_kcal)} kcal` : '2,000 kcal'}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                  BMR: {metabolic?.bmr_kcal ? Math.round(metabolic.bmr_kcal) : '-'} • TDEE: {metabolic?.tdee_kcal ? Math.round(metabolic.tdee_kcal) : '-'}
+                </div>
+              </div>
+
+              {/* Target Protein & Macros */}
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">
+                  <Zap className="w-3.5 h-3.5 text-emerald-500" /> Target Protein
+                </div>
+                <div className="text-base font-black text-slate-900">
+                  {metabolic ? `${Math.round(metabolic.target_protein_g)}g` : '120g'}
+                  <span className="text-xs font-normal text-slate-500 ml-1">({metabolic ? Math.round(metabolic.target_protein_pct) : '25'}%)</span>
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                  Carbs: {metabolic?.target_carbs_g ? Math.round(metabolic.target_carbs_g) : '-'}g • Fat: {metabolic?.target_fats_g ? Math.round(metabolic.target_fats_g) : '-'}g
+                </div>
+              </div>
+
+              {/* Clinical Guardrails */}
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">
+                  <Heart className="w-3.5 h-3.5 text-rose-500" /> Clinical Limits
+                </div>
+                <div className="text-xs font-black text-slate-800">
+                  Sodium: &lt; {guardrails?.sodium_ceiling_mg || 2300} mg
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+                  Glycemic Sens: {risks?.glycemic_sensitivity ? (risks.glycemic_sensitivity > 0.6 ? 'High (Strict)' : 'Moderate') : 'Normal'}
+                </div>
+              </div>
+
+              {/* Active Exclusions & Allergies */}
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-teal-500" /> Safety Rules
+                </div>
+                <div className="text-xs font-bold text-slate-800 truncate" title={(userMatrix.exclusion_mask || []).join(', ') || 'None'}>
+                  {(userMatrix.exclusion_mask || []).length > 0 ? (userMatrix.exclusion_mask || []).join(', ') : 'Standard Diet'}
+                </div>
+                <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
+                  Instant Zero-Score Exclusion
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {evalLoading && (
         <div className="p-12 text-center flex flex-col items-center justify-center bg-slate-50 rounded-2xl border border-slate-200">
           <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
-          <h3 className="text-sm font-bold text-slate-900 mb-1">Running 3-Tier Matchmaker Evaluation...</h3>
-          <p className="text-xs text-slate-500">Applying allergen hard exclusions, glycemic penalties, and macro scoring.</p>
+          <h3 className="text-sm font-bold text-slate-900 mb-1">Synthesizing 3-Tier Clinical Recommendations...</h3>
+          <p className="text-xs text-slate-500">Evaluating each dish against your metabolic matrix, macro targets, and clinical guardrails.</p>
         </div>
       )}
 
       {evalResult && !evalLoading && (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {/* Top Pick Spotlight */}
           {evalResult.top_pick && evalResult.top_pick.tier === 'GOOD' && (
             <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50/40 to-slate-50 border-2 border-emerald-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -341,32 +556,61 @@ export default function RecommendationTableSection({
             </div>
           )}
 
-          {/* Table Filters & Download Menu */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Filter Tabs (Segmented Control) */}
-            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
-              {[
-                { id: 'ALL', label: `📊 Unified Combined Table (${evalResult.total_items_evaluated})` },
-                { id: 'GOOD', label: `🟢 Tier 1: Good (${counts.GOOD})` },
-                { id: 'MEDIUM', label: `🟡 Tier 2: Medium (${counts.MEDIUM})` },
-                { id: 'BAD', label: `🔴 Tier 3: Bad (${counts.BAD})` },
-              ].map((tab) => (
+          {/* Controls Bar: View Mode, Filter Tabs, Search & Download */}
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
+            {/* View Mode Toggle & Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+              <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
-                    activeTab === tab.id
+                  onClick={() => setViewMode('STACKED')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === 'STACKED'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-500 hover:text-slate-900'
                   }`}
                 >
-                  {tab.label}
+                  <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Stacked 3-Tier View</span>
                 </button>
-              ))}
+                <button
+                  onClick={() => setViewMode('TABLE')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === 'TABLE'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <Table className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Unified Table View</span>
+                </button>
+              </div>
+
+              {viewMode === 'TABLE' && (
+                <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                  {[
+                    { id: 'ALL', label: `All (${allRecs.length})` },
+                    { id: 'GOOD', label: `🟢 Good (${counts.GOOD})` },
+                    { id: 'MEDIUM', label: `🟡 Medium (${counts.MEDIUM})` },
+                    { id: 'BAD', label: `🔴 Bad (${counts.BAD})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === tab.id
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Search & Multi-Format Download Dropdown */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* Search & Export */}
+            <div className="flex items-center gap-2 w-full lg:w-auto">
               <div className="relative w-full sm:w-60">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -386,7 +630,7 @@ export default function RecommendationTableSection({
                   title="Export Options"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download</span>
+                  <span>Download Report</span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
 
@@ -456,118 +700,226 @@ export default function RecommendationTableSection({
             </div>
           </div>
 
-          {/* Unified Structured Table View */}
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-            {filtered.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 text-xs">
-                No recommendation items match the selected filter.
+          {/* VIEW MODE 1: STACKED 3-TIER VIEW (Tiered upon each other) */}
+          {viewMode === 'STACKED' && (
+            <div className="space-y-8">
+              {/* TIER 1: GOOD */}
+              <div className="rounded-3xl border-2 border-emerald-200 bg-emerald-50/20 p-5 space-y-4 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      1
+                    </span>
+                    <div>
+                      <h3 className="font-black text-emerald-950 text-base flex items-center gap-2">
+                        🟢 Tier 1: GOOD — Recommended & Optimal Fit
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 text-xs font-bold">
+                          {filteredGood.length} {filteredGood.length === 1 ? 'dish' : 'dishes'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-emerald-800/90 mt-0.5">
+                        High nutritional alignment with your metabolic energy targets, optimal glycemic index, and safe clinical profile.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {filteredGood.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500 italic bg-white/60 rounded-2xl border border-dashed border-emerald-200">
+                    No dishes currently qualify for Tier 1 based on active health guardrails.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredGood.map((item, idx) => renderDishItem(item, idx))}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-slate-50 text-slate-600 text-[11px] font-bold uppercase tracking-wider border-b border-slate-200">
-                    <tr>
-                      <th className="py-3 px-4 w-36">Tier & Fit Score</th>
-                      <th className="py-3 px-4 w-52">Dish Name & Price</th>
-                      <th className="py-3 px-4">Clinical Assessment / Reason</th>
-                      <th className="py-3 px-4 w-60">Nutritional Flags & Allergens</th>
-                      <th className="py-3 px-4 w-56">Chef Customization Advice</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {filtered.map((item, idx) => {
-                      const isGood = item.tier === 'GOOD';
-                      const isMedium = item.tier === 'MEDIUM';
-                      const isBad = item.tier === 'BAD';
 
-                      const badgeClass = isGood
-                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                        : isMedium
-                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                        : 'bg-rose-100 text-rose-900 border border-rose-300';
+              {/* TIER 2: MEDIUM */}
+              <div className="rounded-3xl border-2 border-amber-200 bg-amber-50/20 p-5 space-y-4 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      2
+                    </span>
+                    <div>
+                      <h3 className="font-black text-amber-950 text-base flex items-center gap-2">
+                        🟡 Tier 2: MEDIUM — Moderate / Consume with Portion Care
+                        <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-xs font-bold">
+                          {filteredMedium.length} {filteredMedium.length === 1 ? 'dish' : 'dishes'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-amber-800/90 mt-0.5">
+                        Acceptable choices with moderate saturated fat or glycemic density. Best enjoyed with portion moderation or custom chef tips.
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-                      const rowBg = isGood
-                        ? 'hover:bg-emerald-50/40'
-                        : isMedium
-                        ? 'hover:bg-amber-50/40'
-                        : 'hover:bg-rose-50/40';
+                {filteredMedium.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500 italic bg-white/60 rounded-2xl border border-dashed border-amber-200">
+                    No dishes classified in Tier 2.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredMedium.map((item, idx) => renderDishItem(item, idx))}
+                  </div>
+                )}
+              </div>
 
-                      return (
-                        <tr key={idx} className={`${rowBg} transition-colors`}>
-                          {/* Tier & Score */}
-                          <td className="py-3.5 px-4 align-top">
-                            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${badgeClass}`}>
-                              {isGood ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" /> : isMedium ? <AlertCircle className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" /> : <XCircle className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />}
-                              <span>{item.tier}</span>
-                              <span className="tabular-nums font-mono">({item.fit_score})</span>
-                            </div>
-                          </td>
+              {/* TIER 3: BAD */}
+              <div className="rounded-3xl border-2 border-rose-200 bg-rose-50/20 p-5 space-y-4 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-rose-200/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      3
+                    </span>
+                    <div>
+                      <h3 className="font-black text-rose-950 text-base flex items-center gap-2">
+                        🔴 Tier 3: BAD — Strict Avoidance / High Clinical Risk
+                        <span className="px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 text-xs font-bold">
+                          {filteredBad.length} {filteredBad.length === 1 ? 'dish' : 'dishes'}
+                        </span>
+                      </h3>
+                      <p className="text-xs text-rose-800/90 mt-0.5">
+                        Conflicts with declared allergens, ethical diets (e.g. vegetarian), or exceeds hypertension/glycemic thresholds.
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-                          {/* Dish Name & Price */}
-                          <td className="py-3.5 px-4 align-top">
-                            <div className="font-bold text-slate-900 text-sm leading-snug">{item.dish_name}</div>
-                            {item.price && (
-                              <span className="inline-block mt-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-emerald-800 border border-slate-200 tabular-nums">
-                                {item.price}
-                              </span>
-                            )}
-                          </td>
+                {filteredBad.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500 italic bg-white/60 rounded-2xl border border-dashed border-rose-200">
+                    Zero items classified in Tier 3. All available dishes are safe.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredBad.map((item, idx) => renderDishItem(item, idx))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-                          {/* Clinical Reason */}
-                          <td className="py-3.5 px-4 align-top text-xs text-slate-700 leading-relaxed italic">
-                            "{item.summary_reason}"
-                          </td>
+          {/* VIEW MODE 2: UNIFIED TABLE VIEW */}
+          {viewMode === 'TABLE' && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              {filteredAll.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-xs">
+                  No recommendation items match the selected filter.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="bg-slate-50 text-slate-600 text-[11px] font-bold uppercase tracking-wider border-b border-slate-200">
+                      <tr>
+                        <th className="py-3 px-4 w-36">Tier & Fit Score</th>
+                        <th className="py-3 px-4 w-52">Dish Name & Price</th>
+                        <th className="py-3 px-4">Clinical Assessment / Reason</th>
+                        <th className="py-3 px-4 w-60">Nutritional Flags & Allergens</th>
+                        <th className="py-3 px-4 w-56">Chef Customization Advice</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {filteredAll.map((item, idx) => {
+                        const isGood = item.tier === 'GOOD';
+                        const isMedium = item.tier === 'MEDIUM';
 
-                          {/* Flags & Allergens */}
-                          <td className="py-3.5 px-4 align-top space-y-1.5">
-                            {item.allergen_warnings && item.allergen_warnings.length > 0 && (
-                              <div className="px-2 py-1 rounded-md bg-rose-50 text-rose-900 border border-rose-200 text-[11px] font-bold flex items-center gap-1">
-                                <ShieldAlert className="w-3 h-3 text-rose-600 shrink-0" />
-                                <span>⛔ {item.allergen_warnings.join(', ')}</span>
+                        const badgeClass = isGood
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          : isMedium
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-rose-100 text-rose-900 border border-rose-300';
+
+                        const rowBg = isGood
+                          ? 'hover:bg-emerald-50/40'
+                          : isMedium
+                          ? 'hover:bg-amber-50/40'
+                          : 'hover:bg-rose-50/40';
+
+                        return (
+                          <tr key={idx} className={`${rowBg} transition-colors`}>
+                            {/* Tier & Score */}
+                            <td className="py-3.5 px-4 align-top">
+                              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${badgeClass}`}>
+                                {isGood ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+                                ) : isMedium ? (
+                                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+                                ) : (
+                                  <XCircle className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
+                                )}
+                                <span>{item.tier}</span>
+                                <span className="tabular-nums font-mono">({item.fit_score})</span>
                               </div>
-                            )}
+                            </td>
 
-                            <div className="flex flex-wrap gap-1">
-                              {(item.green_flags || []).map((flag, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold flex items-center gap-0.5"
-                                >
-                                  <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> {flag}
+                            {/* Dish Name & Price */}
+                            <td className="py-3.5 px-4 align-top">
+                              <div className="font-bold text-slate-900 text-sm leading-snug">{item.dish_name}</div>
+                              {item.price && (
+                                <span className="inline-block mt-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-emerald-800 border border-slate-200 tabular-nums">
+                                  {item.price}
                                 </span>
-                              ))}
-                              {(item.red_flags || []).map((flag, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-semibold"
-                                >
-                                  ⚠️ {flag}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
+                              )}
+                            </td>
 
-                          {/* Customization Tip */}
-                          <td className="py-3.5 px-4 align-top text-[11px] text-slate-700">
-                            {item.customization_tips ? (
-                              <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200 text-slate-800 flex items-start gap-1">
-                                <Lightbulb className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
-                                <div>
-                                  <span className="font-bold text-amber-800">Tip:</span> {item.customization_tips}
+                            {/* Clinical Reason */}
+                            <td className="py-3.5 px-4 align-top text-xs text-slate-700 leading-relaxed italic">
+                              "{item.summary_reason}"
+                            </td>
+
+                            {/* Flags & Allergens */}
+                            <td className="py-3.5 px-4 align-top space-y-1.5">
+                              {item.allergen_warnings && item.allergen_warnings.length > 0 && (
+                                <div className="px-2 py-1 rounded-md bg-rose-50 text-rose-900 border border-rose-200 text-[11px] font-bold flex items-center gap-1">
+                                  <ShieldAlert className="w-3 h-3 text-rose-600 shrink-0" />
+                                  <span>⛔ {item.allergen_warnings.join(', ')}</span>
                                 </div>
+                              )}
+
+                              <div className="flex flex-wrap gap-1">
+                                {(item.green_flags || []).map((flag, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold flex items-center gap-0.5"
+                                  >
+                                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> {flag}
+                                  </span>
+                                ))}
+                                {(item.red_flags || []).map((flag, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-semibold"
+                                  >
+                                    ⚠️ {flag}
+                                  </span>
+                                ))}
                               </div>
-                            ) : (
-                              <span className="text-slate-400">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                            </td>
+
+                            {/* Customization Tip */}
+                            <td className="py-3.5 px-4 align-top text-[11px] text-slate-700">
+                              {item.customization_tips ? (
+                                <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200 text-slate-800 flex items-start gap-1">
+                                  <Lightbulb className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-bold text-amber-800">Tip:</span> {item.customization_tips}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

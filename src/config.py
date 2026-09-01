@@ -1,6 +1,6 @@
 """
 Centralized Configuration Module for NutriMenu AI.
-Handles environment variables, Streamlit secrets, model definitions, and system defaults.
+Handles environment variables, Streamlit secrets, Gemini 3.7 Flash model definitions, and system defaults.
 """
 
 import os
@@ -11,13 +11,25 @@ from typing import Optional, List
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
 
-# --- Model & API Defaults ---
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-FALLBACK_MODELS = [
+# --- Gemini 3.7 Flash Defaults ---
+DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
+FALLBACK_GEMINI_MODELS = [
+    "gemini-3.7-flash",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-flash-latest",
+]
+
+# --- OpenRouter Defaults ---
+DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+FALLBACK_OPENROUTER_MODELS = [
+    "meta-llama/llama-3.2-11b-vision-instruct:free",
+    "mistralai/pixtral-12b:free",
+    "qwen/qwen-2.5-vl-72b-instruct:free",
+    "deepseek/deepseek-chat",
 ]
 
 DEFAULT_TIMEOUT_SECONDS = 30
@@ -27,9 +39,13 @@ DEFAULT_TEMPERATURE = 0.15
 DEFAULT_GOOD_THRESHOLD = 75
 DEFAULT_BAD_THRESHOLD = 45
 
-# --- OCR Defaults ---
+# --- OCR & Validator Defaults ---
 DEFAULT_OCR_LANGUAGES = ["en"]
 DEFAULT_MIN_OCR_CONFIDENCE = 0.20
+DEFAULT_VALIDATOR_ACCEPT_THRESHOLD = 80.0
+DEFAULT_VALIDATOR_FLAG_THRESHOLD = 50.0
+DEFAULT_ENABLE_SECOND_PASS_VERIFICATION = False
+DEFAULT_MAX_SECOND_PASS_ITEMS = 5
 
 
 def load_env_file():
@@ -60,18 +76,19 @@ def get_gemini_api_key() -> Optional[str]:
     Safely retrieves the Gemini API key from environment or Streamlit secrets.
     Never returns mock or empty keys.
     """
-    # 1. Environment variable
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if api_key and not api_key.startswith("mock_"):
-        return api_key
+    for key_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AI_API_KEY"]:
+        api_key = os.environ.get(key_name, "").strip()
+        if api_key and not api_key.startswith("mock_") and len(api_key) >= 10:
+            return api_key
 
-    # 2. Streamlit secrets (if running in Streamlit runtime)
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-            secret_key = str(st.secrets["GEMINI_API_KEY"]).strip()
-            if secret_key and not secret_key.startswith("mock_"):
-                return secret_key
+        if hasattr(st, "secrets"):
+            for key_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AI_API_KEY"]:
+                if key_name in st.secrets:
+                    secret_key = str(st.secrets[key_name]).strip()
+                    if secret_key and not secret_key.startswith("mock_") and len(secret_key) >= 10:
+                        return secret_key
     except Exception:
         pass
 
@@ -79,28 +96,80 @@ def get_gemini_api_key() -> Optional[str]:
 
 
 def get_gemini_model_name() -> str:
-    """Retrieves the configured Gemini model name or default."""
-    model = os.environ.get("GEMINI_MODEL", "").strip()
-    if model:
-        return model
+    """Retrieves the configured Gemini model name or default (gemini-3.7-flash)."""
+    for model_var in ["GEMINI_MODEL", "GOOGLE_MODEL"]:
+        model = os.environ.get(model_var, "").strip()
+        if model:
+            return model
 
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and "GEMINI_MODEL" in st.secrets:
-            secret_model = str(st.secrets["GEMINI_MODEL"]).strip()
-            if secret_model:
-                return secret_model
+        if hasattr(st, "secrets"):
+            for model_var in ["GEMINI_MODEL", "GOOGLE_MODEL"]:
+                if model_var in st.secrets:
+                    secret_model = str(st.secrets[model_var]).strip()
+                    if secret_model:
+                        return secret_model
     except Exception:
         pass
 
     return DEFAULT_GEMINI_MODEL
 
 
+def is_gemini_available() -> bool:
+    """Returns True if a valid Gemini API key is configured."""
+    key = get_gemini_api_key()
+    return bool(key and len(key.strip()) >= 10)
+
+
+def get_openrouter_api_key() -> Optional[str]:
+    """Retrieves OpenRouter API key if present."""
+    for key_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY"]:
+        api_key = os.environ.get(key_name, "").strip()
+        if api_key and not api_key.startswith("mock_") and len(api_key) >= 10:
+            return api_key
+
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            for key_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY"]:
+                if key_name in st.secrets:
+                    secret_key = str(st.secrets[key_name]).strip()
+                    if secret_key and not secret_key.startswith("mock_") and len(secret_key) >= 10:
+                        return secret_key
+    except Exception:
+        pass
+
+    return None
+
+
+def get_openrouter_model_name() -> str:
+    """Retrieves configured OpenRouter model name."""
+    model = os.environ.get("OPENROUTER_MODEL", "").strip()
+    if model:
+        return model
+    return DEFAULT_OPENROUTER_MODEL
+
+
+def is_openrouter_available() -> bool:
+    key = get_openrouter_api_key()
+    return bool(key and len(key.strip()) >= 10)
+
+
+def get_active_ai_provider() -> str:
+    """Determines active AI provider: Gemini -> OpenRouter -> Local."""
+    if is_gemini_available():
+        return "gemini"
+    if is_openrouter_available():
+        return "openrouter"
+    return "local"
+
+
 def get_candidate_models(configured_model: Optional[str] = None) -> List[str]:
-    """Returns the ordered list of model candidates to try during API calls."""
+    """Returns ordered candidate models for Gemini API requests."""
     primary = configured_model or get_gemini_model_name()
     models = [primary]
-    for m in FALLBACK_MODELS:
+    for m in FALLBACK_GEMINI_MODELS:
         if m not in models:
             models.append(m)
     return models

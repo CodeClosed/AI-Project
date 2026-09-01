@@ -169,10 +169,10 @@ class MenuSection:
 @dataclass
 class RecognizedMenu:
     """The root output model representing the entire structured recognized menu."""
-    image_path: str
-    image_width: int
-    image_height: int
-    num_columns: int
+    image_path: str = ""
+    image_width: int = 0
+    image_height: int = 0
+    num_columns: int = 1
     sections: List[MenuSection] = field(default_factory=list)
     unclassified_items: List[MenuItem] = field(default_factory=list)
     raw_blocks: List[TextBlock] = field(default_factory=list)

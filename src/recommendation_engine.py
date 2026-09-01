@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 
 from .config import DEFAULT_GOOD_THRESHOLD, DEFAULT_BAD_THRESHOLD
-from .gemini_client import GeminiClient, GeminiAPIError
+from .ai_client import AIClient, AIClientError
 from .models import MenuItem, RecognizedMenu
 from .user_models import NutritionalMatrixProfile, DishEvaluationResult
 from .matrix_generator import UserNutritionalMatrix
@@ -190,12 +190,14 @@ class TieredFoodRecommender:
         user_matrix: Union[UserNutritionalMatrix, NutritionalMatrixProfile, Dict[str, Any]],
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None,
+        ai_client: Optional[AIClient] = None,
+        gemini_client: Optional[AIClient] = None,
         good_threshold: int = DEFAULT_GOOD_THRESHOLD,
         bad_threshold: int = DEFAULT_BAD_THRESHOLD,
     ):
         self.user_matrix = user_matrix
-        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.ai_client = ai_client or gemini_client or AIClient(api_key=api_key, model_name=model_name)
+        self.gemini_client = self.ai_client
         
         # Enforce threshold validity (0 <= bad < good <= 100)
         self.bad_threshold = max(0, min(95, int(bad_threshold)))
@@ -204,7 +206,7 @@ class TieredFoodRecommender:
         self._normalize_user_context()
 
     def is_available(self) -> bool:
-        return self.gemini_client.is_available()
+        return self.ai_client.is_available()
 
     def _normalize_user_context(self):
         """Extracts standard user context fields whether input is UserNutritionalMatrix or NutritionalMatrixProfile."""
@@ -499,7 +501,7 @@ class TieredFoodRecommender:
             }
 
     def _recommend_batch_ai(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
-        """Classifies dishes into 3 tiers using Gemini Flash with deep item-specific clinical reasoning."""
+        """Classifies dishes into 3 tiers using Vision/Language AI with deep item-specific clinical reasoning."""
         prompt = f"""
 You are an elite Clinical Nutrition Scientist and Master Culinary Dietitian (The Middle Model).
 Evaluate each restaurant menu item against the user's specific clinical health profile and classify it into EXACTLY ONE of 3 TIERS:
@@ -556,14 +558,14 @@ Return ONLY valid JSON matching this schema:
   }}
 ]
 """
-        response_json = self.gemini_client.generate_json(prompt, temperature=0.1)
+        response_json = self.ai_client.generate_json(prompt, temperature=0.1)
 
         if isinstance(response_json, dict) and "recommendations" in response_json:
             response_json = response_json["recommendations"]
         elif isinstance(response_json, dict) and "dishes" in response_json:
             response_json = response_json["dishes"]
         elif not isinstance(response_json, list):
-            raise GeminiAPIError("Expected JSON array of recommendations.")
+            raise AIClientError("Expected JSON array of recommendations.")
 
         dish_price_map = {d.get("name", "").lower(): d.get("price", "") for d in dishes}
 
@@ -736,29 +738,43 @@ Return ONLY valid JSON matching this schema:
             customization = "Request oven-baked potato wedges with skin-on or substitute with steamed edamame."
         else:
             # Fallback general heuristics
-            if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber"]):
-                score += 15
-                greens.append("High in dietary fiber, polyphenols, and micronutrients")
+            if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber", "avocado", "sprouts"]):
+                score += 18
+                greens.append("Abundant in dietary fiber, polyphenols, and essential micronutrients")
                 matched_groups.append("Leafy & Cruciferous Vegetables")
-            if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "grilled chicken", "fish tikka", "salmon"]):
-                score += 12
-                greens.append("High protein density supporting lean mass preservation")
+            if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "grilled chicken", "fish tikka", "salmon", "egg", "egg white"]):
+                score += 15
+                greens.append(f"High protein density aiding {self.target_protein_g:.0f}g daily target and satiety")
                 matched_groups.append("Lean / Plant Protein")
-            if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa"]):
-                score -= 25
+            if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa", "poori", "puri", "bhatura"]):
+                score -= 28
                 reds.append("Deep-fried; high oxidized lipid load and elevated caloric density")
                 matched_groups.append("Deep Fried Foods")
+            if any(w in full_text for w in ["rice", "noodles", "pasta", "biryani", "pulao", "naan"]):
+                if self.glycemic_sensitivity > 0.6:
+                    score -= 15
+                    reds.append("Starch-dense carbohydrate base elevates glycemic surge risk")
+                else:
+                    greens.append("Provides sustained carbohydrate energy")
+                matched_groups.append("Carbohydrate Energy Source")
+
+            # Apply clinical risk modifiers
+            if self.sodium_ceiling < 2000 and any(w in full_text for w in ["soup", "gravy", "masala", "salted", "pickle", "sauce"]):
+                score -= 10
+                reds.append(f"Sodium content requires monitoring against your <{self.sodium_ceiling}mg daily limit")
 
             score = max(5, min(98, score))
+            
+            # Formulate dynamic bespoke summary tailored to matrix
             if score >= self.good_threshold:
-                summary = f"Strong nutritional alignment for '{name}'. Low glycemic impact with quality micronutrient density."
-                customization = "Pair with a fresh green salad or steamed whole grain side."
+                summary = f"Optimal metabolic fit for '{name}' matching your {self.target_calories:.0f} kcal energy goal and health profile. Low inflammatory load with high micronutrient and fiber support."
+                customization = "Enjoy with fresh greens or a light squeeze of lemon for enhanced bio-availability."
             elif score >= self.bad_threshold:
-                summary = f"Moderate metabolic fit for '{name}'. Acceptable in portion-controlled servings with mindful sodium and fat balance."
-                customization = "Request light cooking oil or sauce on the side."
+                summary = f"Moderate fit for '{name}'. Contains balanced macronutrients but warrants mindful portioning to stay aligned with your daily metabolic targets."
+                customization = "Request light oil/sauce, pair with dietary fiber, or enjoy in measured portions."
             else:
-                summary = f"'{name}' is not recommended due to high refined carbohydrate, saturated fat, or sodium density."
-                customization = "Consider substituting with grilled, tandoori, or unrefined whole food alternatives."
+                summary = f"'{name}' carries high caloric or glycemic density that conflicts with your active clinical guardrails and metabolic objectives."
+                customization = "Consider substituting with baked, steamed, tandoori, or unrefined whole-food alternatives."
 
         tier = FoodTier.GOOD if score >= self.good_threshold else (FoodTier.MEDIUM if score >= self.bad_threshold else FoodTier.BAD)
 

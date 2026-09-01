@@ -1,22 +1,31 @@
 import os
-import re
 import shutil
 import tempfile
-from typing import Optional, List, Dict, Any
-
+import re
+import logging
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src.pipeline import MenuRecognitionPipeline, RecognizedMenu
+from src.pipeline import MenuRecognitionPipeline
+from src.models import RecognizedMenu
+from src.matrix_generator import AIMatrixGenerator, UserNutritionalMatrix
+from src.recommendation_engine import TieredFoodRecommender, TieredRecommendationResult
+from src.noise_filter import is_valid_food_item
+from src.gemini_extractor import tokenize_food_item
 
 # Load environment variables explicitly
 load_dotenv(override=True)
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="NutriMenu AI API",
-    description="Backend service for OCR menu extraction, metabolic matrix synthesis, and 3-tier food recommendations.",
+    description="Backend service for Gemini 3.7 Flash OCR menu extraction, metabolic matrix synthesis, and personalized 3-tier food recommendations.",
     version="1.0.0"
 )
 
@@ -45,15 +54,29 @@ def read_root():
     return {"status": "ok", "message": "NutriMenu AI Backend Service Running"}
 
 
+@app.get("/api/health")
+def health_check():
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return {
+        "status": "ok",
+        "gemini_available": bool(gemini_key and len(gemini_key.strip()) >= 10),
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.7-flash"),
+    }
+
+
 @app.post("/api/ocr/extract")
 async def extract_menu_from_image(
     file: UploadFile = File(...), 
     api_key: Optional[str] = Form(None)
 ):
-    if not file.content_type.startswith("image/"):
+    is_image = (
+        (file.content_type and file.content_type.startswith("image/"))
+        or (file.filename and file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')))
+    )
+    if not is_image:
         raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
 
-    effective_api_key = api_key or os.getenv("GEMINI_API_KEY")
+    effective_api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
         shutil.copyfileobj(file.file, tmp_file)
@@ -61,44 +84,66 @@ async def extract_menu_from_image(
 
     try:
         pipeline = MenuRecognitionPipeline(api_key=effective_api_key)
-        recognized_menu: RecognizedMenu = pipeline.process_image(tmp_path)
-        flat_items = recognized_menu.to_flat_items()
+        recognized_menu = pipeline.process_image(tmp_path)
 
+        raw_dishes = []
+        if hasattr(recognized_menu, "get_item_names") and callable(recognized_menu.get_item_names):
+            raw_dishes = recognized_menu.get_item_names()
+        elif hasattr(recognized_menu, "to_flat_items") and callable(recognized_menu.to_flat_items):
+            raw_dishes = [item.name for item in recognized_menu.to_flat_items()]
+
+        # Filter out day names, timetable headers, time strings, and noise
         flattened_dishes = []
-        for item in flat_items:
-            parts = re.split(r'[,/\n]', str(item))
-            for part in parts:
-                clean_name = part.strip()
+        seen = set()
+
+        for dish in raw_dishes:
+            tokenized = tokenize_food_item(str(dish))
+            for clean_name in tokenized:
+                # Strip leading day names or slot names
                 clean_name = re.sub(
-                    r'^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Breakfast|Lunch|Snacks|Dinner)\s*', 
+                    r'^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Breakfast|Lunch|Snacks|Dinner)\s*[:\-]?\s*', 
                     '', 
                     clean_name, 
                     flags=re.IGNORECASE
                 ).strip()
-                
-                if clean_name and len(clean_name) > 1 and not clean_name.isdigit():
+
+                if not clean_name or len(clean_name) <= 1 or clean_name.isdigit():
+                    continue
+
+                valid, _ = is_valid_food_item(clean_name, allow_beverages=True)
+                if not valid:
+                    continue
+
+                if clean_name.lower() not in seen:
+                    seen.add(clean_name.lower())
                     flattened_dishes.append(clean_name.title())
 
-        dishes = flattened_dishes
+        # Fallback to direct flat items if list is empty
+        if not flattened_dishes and hasattr(recognized_menu, "to_flat_items"):
+            for item in recognized_menu.to_flat_items():
+                name = item.name.strip().title()
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    flattened_dishes.append(name)
 
-        # Format items for object-based and string-based frontend rendering
         formatted_dishes = [
-            {"id": idx + 1, "name": item} if isinstance(item, str) else item 
-            for idx, item in enumerate(dishes)
+            {"id": idx + 1, "name": item, "section": "Menu Items"}
+            for idx, item in enumerate(flattened_dishes)
         ]
 
         return {
             "success": True,
             "filename": file.filename,
-            "total_extracted": len(dishes),
+            "total_extracted": len(flattened_dishes),
             "dishes": formatted_dishes,
-            "items": dishes,
+            "items": flattened_dishes,
             "metadata": recognized_menu.metadata,
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.error("OCR extraction failed: %s", e)
         raise HTTPException(status_code=500, detail=f"OCR extraction failed: {str(e)}")
     finally:
         if os.path.exists(tmp_path):
@@ -106,124 +151,102 @@ async def extract_menu_from_image(
 
 
 @app.post("/api/matrix/generate")
-async def generate_matrix(req: MatrixRequest):
-    raw_items = req.items or []
-    items = [item["name"] if isinstance(item, dict) and "name" in item else str(item) for item in raw_items]
-    
-    matrix_data = {}
-    for item in items:
-        matrix_data[item] = {
-            "glycemic_index": 55,
-            "inflammatory_score": 2,
-            "gut_irritation": 1,
-            "allergic_trigger": False
-        }
-    return {"success": True, "matrix": matrix_data}
+async def generate_matrix(req: Dict[str, Any]):
+    user_prof = req.get("profile") or req.get("user_profile") or req
+    api_key = req.get("api_key") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+
+    try:
+        generator = AIMatrixGenerator(api_key=api_key)
+        matrix = generator.generate(user_prof)
+        return {"success": True, "matrix": matrix.to_dict()}
+    except Exception as e:
+        logger.warning("AI matrix generation fallback: %s", e)
+        fallback_gen = AIMatrixGenerator()
+        matrix = fallback_gen._generate_deterministic(user_prof)
+        return {"success": True, "matrix": matrix.to_dict(), "fallback": True, "error": str(e)}
+
 
 @app.post("/api/recommend/evaluate")
 async def evaluate_recommendations(req: Dict[str, Any]):
-    raw_items = req.get("items") or req.get("dishes") or []
-    target_day = str(req.get("day") or "").strip().lower()
-    target_meal = str(req.get("meal_type") or "").strip().lower()
+    raw_items = req.get("dishes") or req.get("items") or []
+    matrix_dict = req.get("matrix")
+    user_prof = req.get("profile") or req.get("user_profile") or {}
+    api_key = req.get("api_key") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 
-    # Slot-specific keywords to filter OCR list when items lack strict tags
-    meal_allowed_keywords = {
-        "breakfast": ["dosa", "idly", "upma", "poha", "puri", "chapathi", "paratha", "pongal", "bread", "butter", "jam", "tea", "coffee", "milk", "chutney", "sambar", "aloo besan", "boiled egg", "omelette", "muffin", "vada", "halwa"],
-        "lunch": ["rice", "pulao", "biryani", "roti", "phulka", "chapathi", "dal", "sambar", "rasam", "curry", "subzi", "paneer", "chicken", "curd", "raita", "salad", "pappu", "fry", "khorma", "makhani"],
-        "snacks": ["pakoda", "samosa", "bajji", "vada", "tea", "coffee", "cake", "halwa", "biscuits", "corn", "punugu", "gottalu"],
-        "dinner": ["roti", "phulka", "chapathi", "rice", "dal", "curry", "paneer", "chicken", "milk", "curd", "dosa", "idly", "kichidi"]
-    }
+    # Build or parse UserNutritionalMatrix
+    matrix: Optional[UserNutritionalMatrix] = None
+    if matrix_dict and isinstance(matrix_dict, dict) and "metabolic_targets" in matrix_dict:
+        try:
+            matrix = UserNutritionalMatrix.from_dict(matrix_dict)
+        except Exception:
+            matrix = None
 
-    clean_items = []
+    if matrix is None:
+        generator = AIMatrixGenerator(api_key=api_key)
+        matrix = generator.generate(user_prof or {
+            "age": 35,
+            "gender": "male",
+            "height_cm": 175,
+            "weight_kg": 75,
+            "activity_level": "moderate",
+            "primary_goal": "maintenance",
+            "health_conditions": [],
+            "allergies": [],
+            "dietary_preferences": [],
+        })
+
+    # Prepare dish dictionaries for evaluation
+    dishes = []
     seen = set()
 
     for item in raw_items:
-        item_name = ""
-        item_day = ""
-        item_meal = ""
-
         if isinstance(item, dict):
-            item_name = item.get("name") or item.get("label") or ""
-            item_day = str(item.get("day", "")).strip().lower()
-            item_meal = str(item.get("meal_type", "")).strip().lower()
+            name = item.get("name") or item.get("label") or item.get("dish_name") or ""
+            price = item.get("price") or item.get("raw_price") or ""
+            desc = item.get("description") or ""
+            tags = item.get("tags") or item.get("dietary_tags") or []
         else:
-            item_name = str(item)
+            name = str(item)
+            price = ""
+            desc = ""
+            tags = []
 
-        item_name_clean = item_name.strip()
-        if not item_name_clean or item_name_clean.lower() in seen:
+        name = name.strip()
+        if not name or name.lower() in seen:
             continue
 
-        # 1. Day filtering if structured metadata exists
-        if target_day and item_day and target_day not in item_day:
+        valid, _ = is_valid_food_item(name, allow_beverages=True)
+        if not valid:
             continue
 
-        # 2. Meal slot filtering if structured metadata exists
-        if target_meal and item_meal and target_meal not in item_meal:
-            continue
+        seen.add(name.lower())
+        dishes.append({
+            "name": name,
+            "price": price,
+            "description": desc,
+            "tags": tags,
+        })
 
-        # 3. Keyword filtering for flat OCR lists (prevents Biryani in Breakfast)
-        allowed_kw = meal_allowed_keywords.get(target_meal, [])
-        if allowed_kw and not item_meal:
-            if not any(kw in item_name_clean.lower() for kw in allowed_kw):
-                continue
-
-        seen.add(item_name_clean.lower())
-        clean_items.append(item_name_clean)
-
-    if not clean_items:
+    if not dishes:
         empty_payload = {
-            "tier_counts": {"GOOD": 0, "MEDIUM": 0, "BAD": 0},
-            "all_recommendations": [],
+            "user_summary": matrix.user_summary,
             "total_items_evaluated": 0,
+            "tier_counts": {"GOOD": 0, "MEDIUM": 0, "BAD": 0},
+            "good_items": [],
+            "medium_items": [],
+            "bad_items": [],
+            "all_recommendations": [],
             "top_pick": None
         }
         return {"success": True, "result": empty_payload, "recommendations": empty_payload}
 
-    # Format each individual dish as a standalone recommendation
-    recommendations = []
-    for dish in clean_items:
-        lower_name = dish.lower()
-        score = 88
-        tier = "GOOD"
-        flags = ["Matched Schedule"]
-        tips = "Supports steady energy levels."
+    # Run personalized 3-tier recommendation engine powered by Gemini
+    recommender = TieredFoodRecommender(user_matrix=matrix, api_key=api_key)
+    rec_result: TieredRecommendationResult = recommender.recommend_menu(dishes)
+    result_dict = rec_result.to_dict()
 
-        # Assign basic clinical tier scoring rules
-        if any(k in lower_name for k in ["fried", "pakoda", "samosa", "halwa", "bajji", "cake"]):
-            score = 45
-            tier = "BAD"
-            flags = ["High Calorie / Fried"]
-            tips = "Consume in moderation."
-        elif any(k in lower_name for k in ["paneer", "butter", "biryani"]):
-            score = 68
-            tier = "MEDIUM"
-            flags = ["Moderate Saturated Fats"]
-            tips = "Pair with fresh salad or fiber."
-
-        recommendations.append({
-            "tier": tier,
-            "fit_score": score,
-            "dish_name": dish,
-            "price": "",
-            "summary_reason": f"Available for {target_day.capitalize()} {target_meal.capitalize()}.",
-            "green_flags": flags if tier == "GOOD" else [],
-            "red_flags": flags if tier != "GOOD" else [],
-            "allergen_warnings": [],
-            "customization_tips": tips
-        })
-
-    # Sort high-scoring individual items to the top
-    recommendations.sort(key=lambda x: x["fit_score"], reverse=True)
-
-    result_data = {
-        "tier_counts": {
-            "GOOD": sum(1 for r in recommendations if r["tier"] == "GOOD"),
-            "MEDIUM": sum(1 for r in recommendations if r["tier"] == "MEDIUM"),
-            "BAD": sum(1 for r in recommendations if r["tier"] == "BAD")
-        },
-        "all_recommendations": recommendations,
-        "total_items_evaluated": len(recommendations),
-        "top_pick": recommendations[0] if recommendations else None,
+    return {
+        "success": True,
+        "result": result_dict,
+        "recommendations": result_dict,
     }
-
-    return {"success": True, "result": result_data, "recommendations": result_data}

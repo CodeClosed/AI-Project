@@ -10,8 +10,8 @@ import json
 import logging
 from pathlib import Path
 
-from .config import get_gemini_api_key, get_gemini_model_name
-from .gemini_client import GeminiClient, GeminiAPIError
+from .config import get_openrouter_api_key, get_openrouter_model_name
+from .ai_client import AIClient, AIClientError
 from .models import MenuItem, RecognizedMenu
 from .user_models import NutritionalMatrixProfile, DishEvaluationResult
 
@@ -26,13 +26,15 @@ class MenuDishEvaluator:
         user_matrix: NutritionalMatrixProfile,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None,
+        ai_client: Optional[AIClient] = None,
+        gemini_client: Optional[AIClient] = None,
     ):
         self.user_matrix = user_matrix
-        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.ai_client = ai_client or gemini_client or AIClient(api_key=api_key, model_name=model_name)
+        self.gemini_client = self.ai_client
 
     def is_available(self) -> bool:
-        return self.gemini_client.is_available()
+        return self.ai_client.is_available()
 
     def evaluate_dish(self, dish: Union[MenuItem, str]) -> DishEvaluationResult:
         """Evaluates a single dish or MenuItem object."""
@@ -90,7 +92,7 @@ class MenuDishEvaluator:
         return evaluations
 
     def _evaluate_batch_ai(self, dishes: List[Dict[str, Any]]) -> List[DishEvaluationResult]:
-        """Batch evaluates dishes with Gemini structured JSON."""
+        """Batch evaluates dishes with AI structured JSON."""
         prompt = f"""
 You are a clinical culinary nutritionist. Evaluate these restaurant menu dishes specifically for the given user profile.
 
@@ -135,14 +137,14 @@ Return ONLY valid JSON array with this structure:
   }}
 ]
 """
-        response_json = self.gemini_client.generate_json(prompt, temperature=0.1)
+        response_json = self.ai_client.generate_json(prompt, temperature=0.1)
 
         if isinstance(response_json, dict) and "dishes" in response_json:
             response_json = response_json["dishes"]
         elif isinstance(response_json, dict) and "recommendations" in response_json:
             response_json = response_json["recommendations"]
         elif not isinstance(response_json, list):
-            raise GeminiAPIError("Expected JSON array of dish evaluations.")
+            raise AIClientError("Expected JSON array of dish evaluations.")
 
         results: List[DishEvaluationResult] = []
         for d in response_json:

@@ -135,7 +135,7 @@ def main():
     print("=" * 80)
 
     generator = AIMatrixGenerator()
-    status = "Google Gemini AI (Online)" if generator.is_available() else "Deterministic Baseline (Offline)"
+    status = "Vision/Language AI (Online)" if generator.is_available() else "Deterministic Baseline (Offline)"
     print(f"[*] Engine Status: {status}\n")
 
     print("Choose input mode:")

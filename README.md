@@ -64,7 +64,7 @@ graph TD
 ### 3. 🍽️ Step 3: 3-Tier Food Recommendation Dashboard & Export Studio
 - **KPI Summary**: Total Evaluated, 🟢 Good, 🟡 Medium, and 🔴 Bad counts.
 - **Top Recommendation Spotlight**: Highlighted spotlight card showcasing the single best dish for your health matrix.
-- **Gemini AI Personalization**:
+- **Vision & Language AI Personalization**:
   - Deep biochemical clinical assessments customized to exact dish recipes.
   - Bespoke culinary green flags and red flags.
   - Actionable chef modification tips (e.g. *"Swap for Dum Soya Chaap Biryani"*, *"Request unbuttered 100% whole wheat tandoori roti"*).
@@ -98,15 +98,15 @@ cd ..
 
 ---
 
-### 2. Configure Gemini API Key (Optional)
+### 2. Configure AI Provider API Key (Optional)
 
-You can provide your Gemini API key in either of two ways:
+You can provide your OpenRouter / Vision AI API key in either of two ways:
 1. **Via `.env` file** in the project root:
    ```env
-   GEMINI_API_KEY=your_actual_gemini_api_key
-   GEMINI_MODEL=gemini-2.5-flash
+   OPENROUTER_API_KEY=your_actual_openrouter_api_key
+   OPENROUTER_MODEL=meta-llama/llama-3.2-11b-vision-instruct:free
    ```
-2. **Via UI Profile Drawer**: Click your profile badge in the top right of the web app, enter your API key, and click **Save & Sync Matrix**.
+2. **Via UI Profile Drawer**: Click your profile badge in the top right of the web app and configure your settings.
 
 *(If no API key is provided, the application seamlessly runs on its 100% offline deterministic rule engine).*
 
@@ -190,8 +190,8 @@ The FastAPI backend exposes standard OpenAPI REST endpoints:
 
 - `POST /api/ocr/extract`: Multipart image file upload. Runs deskewing, enhancement, OCR, and noise filtering. Returns structured dishes.
 - `POST /api/matrix/generate`: Accepts user biometrics and clinical conditions. Returns daily metabolic energy and clinical risk vector matrix.
-- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix with optional Gemini API key. Returns 3-tier classification and structured reports.
-- `GET /api/health`: Service health status, Gemini availability, and active OCR device (`cuda` / `cpu`).
+- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix with optional AI API key. Returns 3-tier classification and structured reports.
+- `GET /api/health`: Service health status, AI availability, and active OCR device (`cuda` / `cpu`).
 
 Interactive documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
@@ -217,13 +217,14 @@ AI-Project/
 │   ├── package.json
 │   └── vite.config.js
 ├── src/
+│   ├── ai_client.py              # Unified Vision & Language AI client (OpenRouter / OpenAI)
+│   ├── openrouter_extractor.py   # Open vision model menu extractor
 │   ├── noise_filter.py           # Multi-layer intelligent OCR noise filter
 │   ├── matrix_generator.py       # Metabolic baseline & clinical risk generator
 │   ├── recommendation_engine.py  # 3-tier classification & safety rule authority
 │   ├── ocr_engine.py             # EasyOCR wrapper with CUDA/CPU fallback
 │   ├── preprocessing.py          # Image deskewing, CLAHE, and stream handler
 │   ├── menu_parser.py            # Geometric & semantic menu parser
-│   ├── gemini_client.py          # Resilient HTTP client for Gemini API
 │   ├── ui_components.py          # Streamlit UI presentation components
 │   └── config.py                 # Centralized configuration & thresholds
 ├── tests/                        # 100% offline pytest test suites

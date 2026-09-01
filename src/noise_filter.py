@@ -22,11 +22,11 @@ class AdvancedNoiseFilter:
     METADATA_REGEXES = [
         r"\b(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.(?:com|org|net|site|in|co|io|biz|info|store|shop|me|us|uk|app)\b",
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-        r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b",  # Phone numbers
-        r"\b(?:gst|gstin|vat|fssai|tin|cin|pan|license|lic\s*no|tax\s*id|reg\s*no)\s*[:#\d\w\-\/]*\b",
-        r"\b(?:tax|taxes|service\s*charge|gratuity|vat|gst)\s*(?:included|extra|applicable|apply|paid|\d+%)?",
+        r"(?:^|[^\w])(?:\+?\d{1,3}[-.\s]*)?\(?\d{2,4}\)?[-.\s]*\d{3,4}[-.\s]*\d{3,4}\b",
+        r"\b(?:gst|gstin|vat|fssai|tin|cin|pan|license|lic\s*no|tax\s*id|reg\s*no)\b\s*[:#\d\-\/]*\s*[A-Za-z0-9]*\b",
+        r"\b(?:tax|taxes|service\s*charge|gratuity|vat|gst)\b\s*(?:included|extra|applicable|apply|paid|\d+%)?",
         r"\b(?:terms\s*&?\s*conditions|all\s*rights\s*reserved|copyright|trademark|visit\s*again|thank\s*you)\b",
-        r"\b(?:opening\s*hours?|timings?|open\s*daily|closed\s*on|mon|tue|wed|thu|fri|sat|sun)\b",
+        r"\b(?:opening\s*hours?|timings?|open\s*daily|closed\s*on)\b",
         r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–—to]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", # Timings: 10:00 AM - 11:00 PM
         r"\b(?:take[- ]?away|take[- ]?out|home\s*delivery|free\s*delivery|dine[- ]?in|order\s*online|scan\s*qr|wifi)\b",
         r"\b(?:table\s*no|table\s*#|bill\s*no|invoice\s*no|token\s*no|guest\s*count|server\s*name)\b",
@@ -35,7 +35,8 @@ class AdvancedNoiseFilter:
     # 2. Template branding, banners, and decorative noise
     BRANDING_REGEXES = [
         r"^\s*(?:fast\s*food(?:\s*menu)?|food\s*menu|restaurant(?:\s*menu)?|cafe\s*menu|hotel\s*menu|bar\s*menu)\s*$",
-        r"^\s*(?:the\s*menu|daily\s*menu|our\s*menu|today['’]?s\s*menu|special\s*menu)\s*$",
+        r"^\s*(?:the\s*menu|daily\s*menu|our\s*menu|today['’]?s\s*menu|special\s*menu|menu)\s*$",
+        r"^\s*(?:restaurant\s*name|insert\s*your\s*location\s*here|name|location|address|order\s*now|call\s*now|book\s*now)\s*$",
         r"^\s*(?:welcome|delicious|fresh\s*&?\s*tasty|delicious\s*&?\s*tasty|authentic\s*taste|quality\s*food|best\s*taste)\s*$",
         r"^\s*(?:your\s*logo(?:\s*here)?|logo\s*here|company\s*name|tagline\s*here|brand\s*name)\s*$",
         r"\b(?:a\s+legend(?:\s*[:\-]\s*|\s+)since\b.*)",
@@ -234,3 +235,59 @@ class AdvancedNoiseFilter:
             return True
 
         return False
+
+
+_DEFAULT_NOISE_FILTER = AdvancedNoiseFilter()
+
+BEVERAGE_TERMS = {
+    "coffee", "tea", "iced tea", "ice tea", "lemon tea", "green tea", "milkshake", "milk shake",
+    "shake", "smoothie", "juice", "orange juice", "lemonade", "soda", "cola", "water", "beer",
+    "wine", "cocktail", "cocktails", "mocktail", "mocktails", "latte", "cappuccino", "espresso",
+    "mocha", "soft drink", "cold drink", "energy drink", "hot chocolate", "drinks", "beverages"
+}
+
+_EXPLICIT_HEADER_STRINGS = {
+    "main course", "main dishes", "appetizers", "starters", "desserts", "beverages", "drinks",
+    "sides", "soups", "salads", "menu", "food menu", "restaurant name", "insert your location here",
+    "name", "location", "address", "order now", "call now", "book now", "breakfast", "lunch", "dinner",
+    "snacks"
+}
+
+
+def is_valid_food_item(text: str, allow_beverages: bool = False) -> Tuple[bool, str]:
+    """
+    Validates whether candidate string is a plausible food item and not noise, metadata, or unwanted beverage.
+    Returns (is_valid, reason).
+    """
+    clean = (text or "").strip()
+    if not clean or len(clean) <= 1:
+        return False, "Empty or single-character string"
+
+    lower = clean.lower()
+
+    # Reject standalone price/number/phone strings (e.g. $34, +123456789, 250)
+    if re.match(r"^[\+\$€£₹¥]?\s*\d+(?:[\s\-\.\/]\d+)*\s*[\$€£₹¥]?$", clean):
+        return False, "Standalone price or phone number string"
+
+    if lower in _EXPLICIT_HEADER_STRINGS:
+        return False, "Matches section header or template placeholder"
+
+    if _DEFAULT_NOISE_FILTER.is_metadata_or_business_noise(clean):
+        return False, "Matches business, tax, or contact metadata"
+
+    if _DEFAULT_NOISE_FILTER.is_branding_or_decorative_noise(clean):
+        return False, "Matches restaurant branding, header, or decorative noise"
+
+    if _DEFAULT_NOISE_FILTER.is_gibberish_or_low_entropy(clean):
+        return False, "Low entropy or non-linguistic OCR artifact"
+
+    if not allow_beverages:
+        if lower in BEVERAGE_TERMS:
+            return False, f"Excluded beverage item: {lower}"
+        for b in BEVERAGE_TERMS:
+            if lower == b or lower.startswith(b + " ") or lower.endswith(" " + b):
+                return False, f"Excluded beverage item: {b}"
+
+    return True, "Valid food dish"
+
+
