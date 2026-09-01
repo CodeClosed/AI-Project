@@ -4,10 +4,11 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB.svg?logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Styling-Tailwind%20CSS-38B2AC.svg?logo=tailwind-css)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-Offline%20Passing-success.svg)](https://docs.pytest.org/)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%203.7%20Flash-orange.svg)](https://aistudio.google.com/)
+[![Tests](https://img.shields.io/badge/Tests-70%20Passing-success.svg)](https://docs.pytest.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**NutriMenu AI** is an intelligent full-stack clinical recommendation platform that bridges physical restaurant menus with personalized metabolic and medical health matrices to classify food dishes into **🟢 Tier 1: GOOD**, **🟡 Tier 2: MEDIUM**, and **🔴 Tier 3: BAD** tiers.
+**NutriMenu AI** is an intelligent full-stack clinical recommendation platform that bridges physical restaurant menus with personalized metabolic and medical health matrices. Powered by **Google Gemini 3.7 Flash**, it digitizes complex restaurant and timetable menus, evaluates dishes against clinical guardrails, classifies them into **🟢 Tier 1: GOOD**, **🟡 Tier 2: MEDIUM**, and **🔴 Tier 3: BAD** tiers, and tracks active meal plates with multi-meal cumulative macro budgets.
 
 ---
 
@@ -15,7 +16,7 @@
 
 ```mermaid
 graph TD
-    subgraph UI ["🎨 Modern Client Layer"]
+    subgraph UI ["🎨 Client Layer"]
         ReactUI["💻 React 18 + Vite + Tailwind CSS<br/>(http://localhost:5173)"]
         StreamlitUI["📊 Streamlit Web UI<br/>(http://localhost:8501)"]
     end
@@ -25,9 +26,10 @@ graph TD
     end
 
     subgraph Engines ["🧠 Core Intelligence Engines"]
-        M1["📷 Model 1: Menu OCR & Noise Filter<br/>(EasyOCR + Multi-Layer Artifact Stripper)"]
-        M2["👤 Model 2: Health Matrix Studio<br/>(Mifflin-St Jeor + Clinical Risk Vectors)"]
-        M3["🍽️ Model 3: 3-Tier Matchmaker Engine<br/>(Deterministic Safety & Allergen Rule Authority)"]
+        M1["📷 Vision OCR & Grid Extractor<br/>(Gemini 3.7 Flash + Timetable Grid Parser)"]
+        M2["👤 Health Matrix Studio<br/>(Mifflin-St Jeor + Clinical Risk Vectors)"]
+        M3["🍽️ 3-Tier Matchmaker Engine<br/>(Deep Clinical Reasoning & Safety Authority)"]
+        M4["🍱 Active Plate & Multi-Meal Memory<br/>(Cumulative Macro Burn-Down & AI Gap-Filler)"]
     end
 
     ReactUI -->|REST API| API
@@ -35,47 +37,53 @@ graph TD
     API --> Engines
     M1 --> M3
     M2 --> M3
+    M3 --> M4
 ```
 
 ---
 
-## 🧭 3-Step Guided Workflow
+## 🧭 Core Capabilities & Feature Suite
 
-```
-[ Step 1: 📷 Visual Menu Scanner ] ➔ [ Step 2: 👤 Health Matrix Studio ] ➔ [ Step 3: 🍽️ 3-Tier Recommendations ]
-```
+### 1. 📷 Multimodal Vision OCR & Timetable Grid Parser
+- **Powered by Google Gemini 3.7 Flash**: High-accuracy vision recognition for restaurant menus, chalkboard specials, and university mess timetable grids.
+- **Cell-by-Cell Grid Parsing**: Isolates meal slots and columns independently, preventing horizontal column text bleeding.
+- **Dish Tokenization & Typo Fixing**: Splits compound lines (`Dosa, Sambhar, Chutney` $\to$ individual dishes) and autocorrects OCR typos (`Tdly` $\to$ `Idli`, `Pillka` $\to$ `Phulka`, `Rajama` $\to$ `Rajma`).
+- **Multi-Layer Noise Filter**: Automatically strips template placeholders (`INSERT YOUR LOCATION HERE`), headers (`SRM UNIVERSITY`, `MENU`), timestamps (`7:30 AM - 9:15 AM`), and branding noise.
 
-### 1. 📷 Step 1: Visual Menu Scanner
-- **Drag & Drop OCR**: Upload any PNG/JPG menu photo or scan.
-- **Multi-Layer Noise Filter**: Automatically strips non-food noise (URLs like `.site.com`, emails, phone numbers, GST/tax notices, opening hours, branding banners like `FAST FOOD MENU`, `RESTAURANT`, and decorative `XX` glyphs).
-- **Auto-Correction**: Fixes common OCR typos (e.g. `French Friea` $\to$ `French Fries`, `Dog` $\to$ `Hot Dog`, `Ice Tea` $\to$ `Iced Tea`, `Cheese Cake` $\to$ `Cheesecake`).
-- **Interactive Review**: Preview detected dish names, categories, and price tags with individual delete/edit controls.
-
-### 2. 👤 Step 2: Health Matrix Studio
-- **Biometric Inputs**: Age, Gender, Height, Weight, Activity Level, and Primary Metabolic Goal (Fat Loss, Muscle Gain, Maintenance, Healthy Aging).
+### 2. 👤 Clinical Health Matrix Studio
+- **Biometric Inputs**: Age, Gender, Height, Weight, Activity Level, and Primary Goal (*Fat Loss*, *Muscle Gain*, *Maintenance*, *Healthy Aging*).
 - **Clinical Condition Toggles**: Hypertension, Type 2 Diabetes, Pre-Diabetes, GERD, Hyperlipidemia, PCOS, Fatty Liver.
 - **Zero-Tolerance Allergens**: Peanuts, Tree Nuts, Dairy, Gluten, Shellfish, Eggs, Soy, Sesame.
 - **Live Synthesized Matrix**:
-  - Daily Calorie Target with deficit/surplus adjustment.
-  - Protein, Carbohydrate, and Fat target split bar.
+  - Mifflin-St Jeor daily caloric baseline with deficit/surplus adjustment.
+  - Protein, Carbohydrate, and Fat target split bars.
   - Clinical Guardrails (Sodium ceiling, Glycemic sensitivity, Saturated fat limit, Minimum fiber).
   - Hard Exclusion Mask.
 
-### 3. 🍽️ Step 3: 3-Tier Food Recommendation Dashboard & Export Studio
-- **KPI Summary**: Total Evaluated, 🟢 Good, 🟡 Medium, and 🔴 Bad counts.
-- **Top Recommendation Spotlight**: Highlighted spotlight card showcasing the single best dish for your health matrix.
-- **Vision & Language AI Personalization**:
-  - Deep biochemical clinical assessments customized to exact dish recipes.
-  - Bespoke culinary green flags and red flags.
-  - Actionable chef modification tips (e.g. *"Swap for Dum Soya Chaap Biryani"*, *"Request unbuttered 100% whole wheat tandoori roti"*).
-- **Hard Safety & Allergen Authority**: Instant zero-score override for declared allergens and ethical diets (e.g. meat on vegetarian protocols, dairy/eggs on vegan diets).
-- **Search & Filter**: Real-time unified combined table or segmented tier tabs (Good / Medium / Bad).
-- **Multi-Format Export Studio**:
-  - 📊 **CSV Spreadsheet** (`.csv`) for Excel & Google Sheets
-  - 📝 **Markdown Report** (`.md`) for Obsidian, Notion & GitHub
-  - 🖨️ **Printable HTML / PDF** (`.html`) ready to print or save
-  - 💻 **Raw JSON Payload** (`.json`) for developer integration
-  - 📄 **Plain Text Summary** (`.txt`) for quick review
+### 3. 🍽️ 3-Tier Food Recommendation Dashboard
+- **Tier 1 🟢 (GOOD)**: High nutritional fit, optimal metabolic alignment, safe, health-promoting.
+- **Tier 2 🟡 (MEDIUM)**: Moderate choice, acceptable with portion control or minor culinary modification.
+- **Tier 3 🔴 (BAD)**: Strictly avoid, contains allergens/diet violations, high glycemic spikes, or excessive sodium/saturated fat.
+- **Bespoke Dish-Level Clinical Reasoning**:
+  - Detailed biochemical assessments referencing exact recipe ingredients.
+  - Specific culinary green flags and red flags.
+  - Actionable chef advice (e.g. *"Swap for Tandoori Paneer Tikka"*, *"Request unbuttered 100% whole wheat tandoori roti"*).
+- **Deterministic Safety Authority**: Instant $0$-score override and Tier 🔴 assignment for declared allergens and ethical diets (e.g. meat on vegetarian protocols).
+
+### 4. 🍱 Active Meal Plate & Daily Multi-Meal Memory
+- **Interactive Plate Builder**: Add any recommended dish with custom portion multipliers (`0.5x`, `1.0x`, `1.5x`, `2.0x`, `3.0x`).
+- **Cumulative Daily Macro Burn-Down**:
+  - Two-tone progress bars tracking **Earlier Meals Logged Today** + **Current Active Plate** vs. Daily Targets.
+  - Real-time remaining calorie, protein, carbohydrate, fat, and sodium safe budget calculations.
+- **Multi-Meal History**: Log meals (Breakfast, Lunch, Snacks, Dinner) with timestamps and individual dish breakdowns preserved in browser storage (`localStorage`).
+- **✨ Complete My Plate (AI Gap-Filler)**: Scans remaining menu items to suggest 1–2 complementary companion dishes balancing missing protein/fiber, with strict vegetarian and allergen exclusions.
+
+### 5. 📊 Multi-Format Export Studio
+- 📊 **CSV Spreadsheet** (`.csv`) for Excel & Google Sheets
+- 📝 **Markdown Report** (`.md`) for Obsidian, Notion & GitHub
+- 🖨️ **Printable HTML / PDF** (`.html`) ready to print or save
+- 💻 **Raw JSON Payload** (`.json`) for developer integration
+- 📄 **Plain Text Summary** (`.txt`) for quick review
 
 ---
 
@@ -98,23 +106,25 @@ cd ..
 
 ---
 
-### 2. Configure AI Provider API Key (Optional)
+### 2. Configure Gemini API Key
 
-You can provide your OpenRouter / Vision AI API key in either of two ways:
-1. **Via `.env` file** in the project root:
-   ```env
-   OPENROUTER_API_KEY=your_actual_openrouter_api_key
-   OPENROUTER_MODEL=meta-llama/llama-3.2-11b-vision-instruct:free
-   ```
-2. **Via UI Profile Drawer**: Click your profile badge in the top right of the web app and configure your settings.
+Create a `.env` file in the project root:
+```env
+# Google Gemini API Key (Primary Vision & Recommendation AI Engine)
+# Get your API key from Google AI Studio: https://aistudio.google.com/app/apikey
+GEMINI_API_KEY=your_gemini_api_key_here
 
-*(If no API key is provided, the application seamlessly runs on its 100% offline deterministic rule engine).*
+# Model Selection (Default: gemini-3.7-flash)
+GEMINI_MODEL=gemini-3.7-flash
+```
+
+*(You can also configure or change your API key directly inside the web UI via the Profile Drawer).*
 
 ---
 
 ### 3. Launch the Application
 
-#### Option A: Modern React + FastAPI Full-Stack (Recommended)
+#### Option A: Full-Stack React + FastAPI (Recommended)
 Runs both the FastAPI backend and React frontend concurrently:
 ```bash
 python run_fullstack.py
@@ -133,7 +143,7 @@ python run_ui.py
 
 ## 🧪 Automated Test Suite
 
-The test suite runs 100% offline without requiring active API keys:
+All 70 test suites run 100% offline:
 
 ```bash
 python -m pytest -v
@@ -142,14 +152,18 @@ python -m pytest -v
 ### Test Coverage Highlights:
 | Test Module | Focus Area | Status |
 | :--- | :--- | :---: |
+| `tests/test_plate_optimizer.py` | Multi-dish nutrient estimation, burn-down math, vegetarian safety | ✅ PASSED (4/4) |
 | `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | ✅ PASSED (6/6) |
 | `tests/test_safety_and_rules.py` | Strict allergen exclusions (score = 0), diabetic glycemic penalties | ✅ PASSED (7/7) |
-| `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | ✅ PASSED (6/6) |
-| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, mocked HTTP | ✅ PASSED (9/9) |
+| `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | ✅ PASSED (7/7) |
+| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, candidate failover | ✅ PASSED (9/9) |
 | `tests/test_matrix_generator.py` | Metabolic energy equations, macro distribution, clinical vectors | ✅ PASSED (3/3) |
 | `tests/test_integration_pipeline.py` | End-to-end OCR $\to$ Matrix $\to$ 3-Tier Matchmaker | ✅ PASSED (2/2) |
 | `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | ✅ PASSED (5/5) |
-| `tests/test_nutrition_ai.py` | Heuristic dish evaluator, macro splits, markdown serialization | ✅ PASSED (6/6) |
+| `tests/test_nutrition_ai.py` | Dish evaluator, macro splits, markdown serialization | ✅ PASSED (5/5) |
+| `tests/test_config.py` | Config getters, API key detection, fallback candidates | ✅ PASSED (4/4) |
+| `tests/test_extraction_validator.py` | Validation rules, confidence scoring | ✅ PASSED (12/12) |
+| `tests/test_openrouter_extractor.py` | Vision extractor fallback pipeline | ✅ PASSED (6/6) |
 
 ---
 
@@ -188,10 +202,12 @@ To guarantee clinical safety, recommendations follow a strict two-stage hierarch
 
 The FastAPI backend exposes standard OpenAPI REST endpoints:
 
-- `POST /api/ocr/extract`: Multipart image file upload. Runs deskewing, enhancement, OCR, and noise filtering. Returns structured dishes.
+- `POST /api/ocr/extract`: Multipart image file upload. Runs Gemini 3.7 Flash vision extraction and grid parsing. Returns all recognized dishes.
 - `POST /api/matrix/generate`: Accepts user biometrics and clinical conditions. Returns daily metabolic energy and clinical risk vector matrix.
-- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix with optional AI API key. Returns 3-tier classification and structured reports.
-- `GET /api/health`: Service health status, AI availability, and active OCR device (`cuda` / `cpu`).
+- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix using Gemini 3.7 Flash. Returns 3-tier classification and structured reports.
+- `POST /api/plate/evaluate`: Evaluates multi-dish plate, computing cumulative macronutrients and remaining daily budget.
+- `POST /api/plate/complete`: Scans remaining menu dishes to suggest 1–2 companion items matching health matrix and dietary exclusions.
+- `GET /api/health`: Service health status, Gemini availability, and active model.
 
 Interactive documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
@@ -206,28 +222,26 @@ AI-Project/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Stepper.jsx       # 3-step wizard navigation
-│   │   │   ├── Step1MenuUpload.jsx # Drag & drop OCR menu scanner
-│   │   │   ├── Step2HealthMatrix.jsx # Health profile & live matrix studio
-│   │   │   ├── Step3Recommendations.jsx # 3-tier recommendations dashboard
-│   │   │   └── DishCard.jsx      # Beautified individual food card
+│   │   │   ├── AccountDrawerModal.jsx        # Health profile & live matrix studio
+│   │   │   ├── MenuUploadSection.jsx         # Gemini 3.7 Flash OCR menu scanner
+│   │   │   ├── RecommendationTableSection.jsx # 3-tier recommendations dashboard
+│   │   │   └── MealPlateDrawer.jsx           # Active meal plate & multi-meal tracker
 │   │   ├── App.jsx               # Main React application
 │   │   ├── api.js                # API client
 │   │   └── index.css             # Tailwind CSS & glassmorphic styles
 │   ├── package.json
 │   └── vite.config.js
 ├── src/
-│   ├── ai_client.py              # Unified Vision & Language AI client (OpenRouter / OpenAI)
-│   ├── openrouter_extractor.py   # Open vision model menu extractor
-│   ├── noise_filter.py           # Multi-layer intelligent OCR noise filter
-│   ├── matrix_generator.py       # Metabolic baseline & clinical risk generator
+│   ├── gemini_client.py          # Google Gemini 3.7 Flash API Client
+│   ├── gemini_extractor.py       # Multimodal table grid OCR menu extractor
+│   ├── plate_optimizer.py        # Multi-dish plate synergy & companion suggester
+│   ├── matrix_generator.py       # Mifflin-St Jeor metabolic & clinical matrix
 │   ├── recommendation_engine.py  # 3-tier classification & safety rule authority
-│   ├── ocr_engine.py             # EasyOCR wrapper with CUDA/CPU fallback
-│   ├── preprocessing.py          # Image deskewing, CLAHE, and stream handler
-│   ├── menu_parser.py            # Geometric & semantic menu parser
-│   ├── ui_components.py          # Streamlit UI presentation components
+│   ├── noise_filter.py           # Multi-layer OCR noise filter & typo correction
+│   ├── pipeline.py               # End-to-end menu recognition pipeline
+│   ├── models.py                 # Data classes & schemas
 │   └── config.py                 # Centralized configuration & thresholds
-├── tests/                        # 100% offline pytest test suites
+├── tests/                        # 100% offline pytest test suites (70 tests)
 ├── app.py                        # Streamlit application
 ├── run_fullstack.py              # Full-stack launcher (FastAPI + React)
 ├── run_ui.py                     # Streamlit launcher

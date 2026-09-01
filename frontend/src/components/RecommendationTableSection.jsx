@@ -26,6 +26,9 @@ import {
   ShieldCheck,
   Zap,
   Info,
+  Utensils,
+  Plus,
+  Check,
 } from 'lucide-react';
 
 export default function RecommendationTableSection({
@@ -35,6 +38,9 @@ export default function RecommendationTableSection({
   evalResult,
   evalLoading,
   onRunEvaluation,
+  plate = [],
+  onAddToPlate,
+  onOpenPlateDrawer,
 }) {
   const [viewMode, setViewMode] = useState('STACKED'); // 'STACKED' | 'TABLE'
   const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' | 'GOOD' | 'MEDIUM' | 'BAD'
@@ -400,6 +406,32 @@ export default function RecommendationTableSection({
                 <span className="font-bold text-amber-900">Chef's Advice:</span> {item.customization_tips}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Add to Plate Action Button */}
+        {onAddToPlate && (
+          <div className="pt-2 border-t border-slate-100">
+            {(() => {
+              const plateItem = plate.find((p) => p.name.toLowerCase() === item.dish_name.toLowerCase());
+              return plateItem ? (
+                <button
+                  onClick={() => onAddToPlate({ name: item.dish_name, price: item.price })}
+                  className="w-full py-2 px-3 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>On Plate ({plateItem.portion || 1}x) • Add +1</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => onAddToPlate({ name: item.dish_name, price: item.price })}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add to Plate</span>
+                </button>
+              );
+            })()}
           </div>
         )}
       </div>

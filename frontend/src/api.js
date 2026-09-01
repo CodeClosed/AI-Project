@@ -45,7 +45,7 @@ export async function generateHealthMatrix(profilePayload) {
 
 export async function evaluateRecommendations(payload) {
   try {
-    const res = await fetch("http://localhost:8000/api/recommend/evaluate", {
+    const res = await fetch(`${API_BASE_URL}/api/recommend/evaluate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -61,3 +61,43 @@ export async function evaluateRecommendations(payload) {
     return null;
   }
 }
+
+export async function evaluatePlate(payload) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/plate/evaluate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(`Plate evaluation failed with status ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Plate evaluation error:", err);
+    return null;
+  }
+}
+
+export async function completePlate(payload) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/plate/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(`Plate completion failed with status ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Plate completion error:", err);
+    return null;
+  }
+}
+
+

@@ -3,6 +3,7 @@ import { Salad, ShieldCheck, User, Settings, Sparkles, Calendar, Utensils } from
 import AccountDrawerModal from './components/AccountDrawerModal';
 import MenuUploadSection from './components/MenuUploadSection';
 import RecommendationTableSection from './components/RecommendationTableSection';
+import MealPlateDrawer from './components/MealPlateDrawer';
 import { generateHealthMatrix, evaluateRecommendations } from './api';
 
 const DEFAULT_PROFILE = {
@@ -112,6 +113,27 @@ export default function App() {
   const [loadingMatrix, setLoadingMatrix] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
+  // Active Plate & Multi-Dish State
+  const [plate, setPlate] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nutrimenu_active_plate');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isPlateDrawerOpen, setIsPlateDrawerOpen] = useState(false);
+
+  // Logged Daily Meals History
+  const [loggedMeals, setLoggedMeals] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nutrimenu_daily_logged_meals');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [dishes, setDishes] = useState([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState(null);
@@ -126,6 +148,18 @@ export default function App() {
     } catch {}
     setUserMatrix((prev) => prev || computeLocalMatrix(profile));
   }, [profile]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nutrimenu_active_plate', JSON.stringify(plate));
+    } catch {}
+  }, [plate]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nutrimenu_daily_logged_meals', JSON.stringify(loggedMeals));
+    } catch {}
+  }, [loggedMeals]);
 
   const syncMatrix = useCallback(async (currentProfile) => {
     setLoadingMatrix(true);
@@ -219,6 +253,47 @@ export default function App() {
     }
   }, [dishes, userMatrix]);
 
+  // Plate Management Handlers
+  const handleAddToPlate = (dish) => {
+    const name = dish.name || dish.dish_name || String(dish);
+    const existing = plate.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setPlate(plate.map((p) => 
+        p.name.toLowerCase() === name.toLowerCase() 
+          ? { ...p, portion: (p.portion || 1.0) + 0.5 }
+          : p
+      ));
+    } else {
+      setPlate([...plate, { name, price: dish.price || '', portion: 1.0 }]);
+    }
+    setIsPlateDrawerOpen(true);
+  };
+
+  const handleUpdatePortion = (dishName, newPortion) => {
+    setPlate(plate.map((p) => 
+      p.name.toLowerCase() === dishName.toLowerCase() 
+        ? { ...p, portion: newPortion }
+        : p
+    ));
+  };
+
+  const handleRemoveFromPlate = (dishName) => {
+    setPlate(plate.filter((p) => p.name.toLowerCase() !== dishName.toLowerCase()));
+  };
+
+  const handleClearPlate = () => {
+    setPlate([]);
+  };
+
+  const handleSaveMealToLog = (mealEntry) => {
+    setLoggedMeals((prev) => [mealEntry, ...prev]);
+    setPlate([]); // Clears active plate to start fresh for the next meal
+  };
+
+  const handleRemoveLoggedMeal = (mealId) => {
+    setLoggedMeals((prev) => prev.filter((m) => m.id !== mealId));
+  };
+
   const dietLabels = (profile.dietary_preferences || []).join(', ');
   const allergyLabels = (profile.allergies || []).join(', ');
 
@@ -240,32 +315,48 @@ export default function App() {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsAccountModalOpen(true)}
-            className="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-slate-100/80 transition-all text-xs font-semibold text-slate-800 shadow-xs cursor-pointer"
-          >
-            <div className="relative w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-              <User className="w-4 h-4" />
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full" />
-            </div>
-            <div className="text-left leading-tight hidden sm:block">
-              <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                <span>{dietLabels || 'Standard'}</span>
-                {allergyLabels && (
-                  <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold">
-                    {allergyLabels}
-                  </span>
-                )}
+          <div className="flex items-center gap-3">
+            {/* Active Plate Quick Opener */}
+            <button
+              onClick={() => setIsPlateDrawerOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 transition text-xs font-bold shadow-2xs cursor-pointer"
+            >
+              <Utensils className="w-4 h-4 text-emerald-600" />
+              <span>My Plate</span>
+              <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center">
+                {plate.length}
+              </span>
+            </button>
+
+            {/* Profile Drawer Opener */}
+            <button
+              onClick={() => setIsAccountModalOpen(true)}
+              className="flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-slate-50 border border-slate-200 hover:border-emerald-400 hover:bg-slate-100/80 transition-all text-xs font-semibold text-slate-800 shadow-xs cursor-pointer"
+            >
+              <div className="relative w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                <User className="w-4 h-4" />
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full" />
               </div>
-              <div className="text-[10px] text-slate-500 font-medium">
-                {userMatrix?.metabolic_targets ? `${Math.round(userMatrix.metabolic_targets.target_calories_kcal)} kcal • Edit Profile` : 'Click to setup profile'}
+              <div className="text-left leading-tight hidden sm:block">
+                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span>{dietLabels || 'Standard'}</span>
+                  {allergyLabels && (
+                    <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold">
+                      {allergyLabels}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">
+                  {userMatrix?.metabolic_targets ? `${Math.round(userMatrix.metabolic_targets.target_calories_kcal)} kcal • Edit Profile` : 'Click to setup profile'}
+                </div>
               </div>
-            </div>
-          </button>
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
+        {/* Section 1: OCR Menu Upload */}
         <MenuUploadSection
           profile={profile}
           dishes={dishes}
@@ -278,6 +369,7 @@ export default function App() {
           setImagePreview={setImagePreview}
         />
 
+        {/* Section 2: 3-Tier Recommendations */}
         <RecommendationTableSection
           dishes={dishes}
           userMatrix={userMatrix}
@@ -285,8 +377,28 @@ export default function App() {
           evalResult={evalResult}
           evalLoading={evalLoading}
           onRunEvaluation={() => runEvaluation(userMatrix, dishes)}
+          plate={plate}
+          onAddToPlate={handleAddToPlate}
+          onOpenPlateDrawer={() => setIsPlateDrawerOpen(true)}
         />
       </main>
+
+      {/* Slide-out Meal Plate & Macro Burn-Down Drawer */}
+      <MealPlateDrawer
+        isOpen={isPlateDrawerOpen}
+        onClose={() => setIsPlateDrawerOpen(false)}
+        plate={plate}
+        onUpdatePortion={handleUpdatePortion}
+        onRemoveItem={handleRemoveFromPlate}
+        onClearPlate={handleClearPlate}
+        onAddItem={handleAddToPlate}
+        allDishes={dishes}
+        userMatrix={userMatrix}
+        profile={profile}
+        loggedMeals={loggedMeals}
+        onSaveMealToLog={handleSaveMealToLog}
+        onRemoveLoggedMeal={handleRemoveLoggedMeal}
+      />
 
       <AccountDrawerModal
         isOpen={isAccountModalOpen}

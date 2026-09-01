@@ -250,3 +250,78 @@ async def evaluate_recommendations(req: Dict[str, Any]):
         "result": result_dict,
         "recommendations": result_dict,
     }
+
+
+@app.post("/api/plate/evaluate")
+async def evaluate_plate_meal(req: Dict[str, Any]):
+    """Calculates cumulative plate nutrition, remaining budget, and multi-dish synergy."""
+    plate_items = req.get("plate") or req.get("items") or []
+    matrix_dict = req.get("matrix")
+    user_prof = req.get("profile") or {}
+    api_key = req.get("api_key") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+
+    matrix: Optional[UserNutritionalMatrix] = None
+    if matrix_dict and isinstance(matrix_dict, dict) and "metabolic_targets" in matrix_dict:
+        try:
+            matrix = UserNutritionalMatrix.from_dict(matrix_dict)
+        except Exception:
+            matrix = None
+
+    if matrix is None:
+        generator = AIMatrixGenerator(api_key=api_key)
+        matrix = generator.generate(user_prof or {
+            "age": 35,
+            "gender": "male",
+            "height_cm": 175,
+            "weight_kg": 75,
+        })
+
+    from src.plate_optimizer import PlateOptimizer
+    optimizer = PlateOptimizer(user_matrix=matrix, api_key=api_key)
+    plate_summary = optimizer.evaluate_plate(plate_items, user_matrix=matrix)
+
+    return {
+        "success": True,
+        "plate_evaluation": plate_summary,
+    }
+
+
+@app.post("/api/plate/complete")
+async def complete_plate_suggestions(req: Dict[str, Any]):
+    """Suggests complementary companion dishes from the menu to balance the plate."""
+    plate_items = req.get("plate") or []
+    candidate_menu = req.get("menu_dishes") or req.get("dishes") or []
+    matrix_dict = req.get("matrix")
+    api_key = req.get("api_key") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+
+    matrix: Optional[UserNutritionalMatrix] = None
+    if matrix_dict and isinstance(matrix_dict, dict) and "metabolic_targets" in matrix_dict:
+        try:
+            matrix = UserNutritionalMatrix.from_dict(matrix_dict)
+        except Exception:
+            matrix = None
+
+    if matrix is None:
+        user_prof = req.get("profile") or req.get("user_profile") or {}
+        generator = AIMatrixGenerator(api_key=api_key)
+        matrix = generator.generate(user_prof or {
+            "age": 35,
+            "gender": "male",
+            "height_cm": 175,
+            "weight_kg": 75,
+        })
+
+    from src.plate_optimizer import PlateOptimizer
+    optimizer = PlateOptimizer(user_matrix=matrix, api_key=api_key)
+    clean_candidates = [
+        d["name"] if isinstance(d, dict) and "name" in d else str(d)
+        for d in candidate_menu
+    ]
+    suggestions = optimizer.suggest_plate_companions(plate_items, clean_candidates, user_matrix=matrix)
+
+    return {
+        "success": True,
+        "suggestions": suggestions,
+    }
+
+
