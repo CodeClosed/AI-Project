@@ -278,7 +278,6 @@ export default function App() {
     } else {
       setPlate([...plate, { name, price: dish.price || '', portion: 1.0 }]);
     }
-    setIsPlateDrawerOpen(true);
   };
 
   const handleUpdatePortion = (dishName, newPortion) => {
