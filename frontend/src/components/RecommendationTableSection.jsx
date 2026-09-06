@@ -30,6 +30,7 @@ import {
   Plus,
   Check,
 } from 'lucide-react';
+import { sanitizeDishFlags } from '../utils/flagUtils';
 
 export default function RecommendationTableSection({
   dishes,
@@ -355,12 +356,13 @@ export default function RecommendationTableSection({
           tierLabel: 'Avoid',
         };
 
-    const topGreenFlags = (item.green_flags || []).slice(0, isGood ? 2 : 1);
-    const topRedFlags = (item.red_flags || []).slice(0, isGood ? 1 : 2);
+    const { allergenWarnings, greenFlags, redFlags } = sanitizeDishFlags(item);
+    const topGreenFlags = greenFlags.slice(0, isGood ? 2 : 1);
+    const topRedFlags = redFlags.slice(0, isGood ? 1 : 2);
     const hasMoreDetails =
       item.customization_tips ||
-      (item.green_flags && item.green_flags.length > topGreenFlags.length) ||
-      (item.red_flags && item.red_flags.length > topRedFlags.length) ||
+      greenFlags.length > topGreenFlags.length ||
+      redFlags.length > topRedFlags.length ||
       item.estimated_calories;
 
     return (
@@ -396,11 +398,11 @@ export default function RecommendationTableSection({
             </div>
           </div>
 
-          {/* Conflict / Allergen Alert (Sleek, Not Clunky) */}
-          {item.allergen_warnings && item.allergen_warnings.length > 0 && (
-            <div className="px-2 py-1 rounded-lg bg-rose-50/80 border border-rose-200/80 text-rose-800 text-[11px] font-semibold flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-              <span className="truncate">{item.allergen_warnings.join(', ')}</span>
+          {/* Conflict / Allergen Alert (Sleek, Non-repetitive) */}
+          {allergenWarnings.length > 0 && (
+            <div className="px-2.5 py-1.5 rounded-xl bg-rose-50 border border-rose-200/80 text-rose-800 text-[11px] font-semibold flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span className="truncate">{allergenWarnings.join(' • ')}</span>
             </div>
           )}
 
@@ -409,29 +411,31 @@ export default function RecommendationTableSection({
             {item.summary_reason}
           </p>
 
-          {/* Key Nutritional Chips (Max 2 chips for decluttered scan) */}
-          <div className="flex flex-wrap gap-1 pt-0.5">
-            {topGreenFlags.map((flag, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 rounded-md bg-emerald-50/70 border border-emerald-100 text-emerald-700 text-[10px] font-medium flex items-center gap-1"
-                title={flag}
-              >
-                <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
-                <span className="truncate max-w-[140px]">{flag}</span>
-              </span>
-            ))}
-            {topRedFlags.map((flag, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 rounded-md bg-rose-50/70 border border-rose-100 text-rose-700 text-[10px] font-medium flex items-center gap-1"
-                title={flag}
-              >
-                <span className="text-rose-500 text-[9px]">⚠️</span>
-                <span className="truncate max-w-[140px]">{flag}</span>
-              </span>
-            ))}
-          </div>
+          {/* Key Nutritional Chips (Decluttered & Consistent Typography) */}
+          {(topGreenFlags.length > 0 || topRedFlags.length > 0) && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {topGreenFlags.map((flag, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60 text-[11px] font-medium"
+                  title={flag}
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                  <span className="truncate max-w-[140px]">{flag}</span>
+                </span>
+              ))}
+              {topRedFlags.map((flag, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200/60 text-[11px] font-medium"
+                  title={flag}
+                >
+                  <span className="text-rose-500 text-[9px] shrink-0">⚠️</span>
+                  <span className="truncate max-w-[140px]">{flag}</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Interactive Expand / Collapse for Deep Details */}
           {hasMoreDetails && (
@@ -479,16 +483,16 @@ export default function RecommendationTableSection({
                   )}
 
                   {/* Full Flags List */}
-                  {(item.green_flags?.length > topGreenFlags.length || item.red_flags?.length > topRedFlags.length) && (
-                    <div className="flex flex-wrap gap-1">
-                      {item.green_flags?.slice(topGreenFlags.length).map((flag, i) => (
-                        <span key={`g-${i}`} className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px]">
-                          ✓ {flag}
+                  {(greenFlags.length > topGreenFlags.length || redFlags.length > topRedFlags.length) && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {greenFlags.slice(topGreenFlags.length).map((flag, i) => (
+                        <span key={`g-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-medium">
+                          <Sparkles className="w-2.5 h-2.5 text-emerald-600 shrink-0" /> {flag}
                         </span>
                       ))}
-                      {item.red_flags?.slice(topRedFlags.length).map((flag, i) => (
-                        <span key={`r-${i}`} className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px]">
-                          ⚠️ {flag}
+                      {redFlags.slice(topRedFlags.length).map((flag, i) => (
+                        <span key={`r-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-100 text-[10px] font-medium">
+                          <span className="text-rose-500 text-[9px] shrink-0">⚠️</span> {flag}
                         </span>
                       ))}
                     </div>
@@ -961,6 +965,8 @@ export default function RecommendationTableSection({
                           ? 'hover:bg-amber-50/40'
                           : 'hover:bg-rose-50/40';
 
+                        const { allergenWarnings: tableWarnings, greenFlags: tableGreens, redFlags: tableReds } = sanitizeDishFlags(item);
+
                         return (
                           <tr key={idx} className={`${rowBg} transition-colors`}>
                             {/* Tier & Score */}
@@ -995,31 +1001,33 @@ export default function RecommendationTableSection({
 
                             {/* Flags & Allergens */}
                             <td className="py-3.5 px-4 align-top space-y-1.5">
-                              {item.allergen_warnings && item.allergen_warnings.length > 0 && (
-                                <div className="px-2 py-1 rounded-md bg-rose-50 text-rose-900 border border-rose-200 text-[11px] font-bold flex items-center gap-1">
-                                  <ShieldAlert className="w-3 h-3 text-rose-600 shrink-0" />
-                                  <span>⛔ {item.allergen_warnings.join(', ')}</span>
+                              {tableWarnings.length > 0 && (
+                                <div className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-900 border border-rose-200 text-xs font-semibold flex items-center gap-1.5">
+                                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                  <span>{tableWarnings.join(' • ')}</span>
                                 </div>
                               )}
 
-                              <div className="flex flex-wrap gap-1">
-                                {(item.green_flags || []).map((flag, i) => (
-                                  <span
-                                    key={i}
-                                    className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold flex items-center gap-0.5"
-                                  >
-                                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> {flag}
-                                  </span>
-                                ))}
-                                {(item.red_flags || []).map((flag, i) => (
-                                  <span
-                                    key={i}
-                                    className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-semibold"
-                                  >
-                                    ⚠️ {flag}
-                                  </span>
-                                ))}
-                              </div>
+                              {(tableGreens.length > 0 || tableReds.length > 0) && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {tableGreens.map((flag, i) => (
+                                    <span
+                                      key={i}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-medium"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5 text-emerald-600 shrink-0" /> {flag}
+                                    </span>
+                                  ))}
+                                  {tableReds.map((flag, i) => (
+                                    <span
+                                      key={i}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200/80 text-rose-800 text-[11px] font-medium"
+                                    >
+                                      <span className="text-rose-500 text-[9px] shrink-0">⚠️</span> {flag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </td>
 
                             {/* Customization Tip */}

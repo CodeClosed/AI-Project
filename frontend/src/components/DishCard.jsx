@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { sanitizeDishFlags } from '../utils/flagUtils';
 
 export default function DishCard({ dish }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -43,12 +44,13 @@ export default function DishCard({ dish }) {
         icon: <XCircle className="w-4 h-4 text-rose-400 shrink-0" />,
       };
 
-  const topGreenFlags = (dish.green_flags || []).slice(0, isGood ? 2 : 1);
-  const topRedFlags = (dish.red_flags || []).slice(0, isGood ? 1 : 2);
+  const { allergenWarnings, greenFlags, redFlags } = sanitizeDishFlags(dish);
+  const topGreenFlags = greenFlags.slice(0, isGood ? 2 : 1);
+  const topRedFlags = redFlags.slice(0, isGood ? 1 : 2);
   const hasMoreDetails =
     dish.customization_tips ||
-    (dish.green_flags && dish.green_flags.length > topGreenFlags.length) ||
-    (dish.red_flags && dish.red_flags.length > topRedFlags.length) ||
+    greenFlags.length > topGreenFlags.length ||
+    redFlags.length > topRedFlags.length ||
     dish.estimated_calories;
 
   return (
@@ -84,11 +86,11 @@ export default function DishCard({ dish }) {
         </div>
 
         {/* Hard Exclusion Banner */}
-        {dish.allergen_warnings && dish.allergen_warnings.length > 0 && (
+        {allergenWarnings.length > 0 && (
           <div className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2">
             <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
             <div className="text-[11px] text-rose-300 font-semibold truncate">
-              ⛔ {dish.allergen_warnings.join(', ')}
+              {allergenWarnings.join(' • ')}
             </div>
           </div>
         )}
@@ -99,29 +101,31 @@ export default function DishCard({ dish }) {
         </p>
 
         {/* Compact Key Tags (Max 2 for clean scanning) */}
-        <div className="flex flex-wrap gap-1 pt-0.5">
-          {topGreenFlags.map((flag, idx) => (
-            <span
-              key={idx}
-              className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-medium flex items-center gap-1"
-              title={flag}
-            >
-              <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
-              <span className="truncate max-w-[130px]">{flag}</span>
-            </span>
-          ))}
+        {(topGreenFlags.length > 0 || topRedFlags.length > 0) && (
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {topGreenFlags.map((flag, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium"
+                title={flag}
+              >
+                <Sparkles className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                <span className="truncate max-w-[130px]">{flag}</span>
+              </span>
+            ))}
 
-          {topRedFlags.map((flag, idx) => (
-            <span
-              key={idx}
-              className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[10px] font-medium flex items-center gap-1"
-              title={flag}
-            >
-              <span className="text-[9px] text-rose-400">⚠️</span>
-              <span className="truncate max-w-[130px]">{flag}</span>
-            </span>
-          ))}
-        </div>
+            {topRedFlags.map((flag, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-medium"
+                title={flag}
+              >
+                <span className="text-[9px] text-rose-400 shrink-0">⚠️</span>
+                <span className="truncate max-w-[130px]">{flag}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Expandable Chef Tip & Deep Details */}
         {hasMoreDetails && (
@@ -167,16 +171,16 @@ export default function DishCard({ dish }) {
                 )}
 
                 {/* Remaining Tags */}
-                {(dish.green_flags?.length > topGreenFlags.length || dish.red_flags?.length > topRedFlags.length) && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {dish.green_flags?.slice(topGreenFlags.length).map((flag, idx) => (
-                      <span key={`g-${idx}`} className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px]">
-                        ✓ {flag}
+                {(greenFlags.length > topGreenFlags.length || redFlags.length > topRedFlags.length) && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {greenFlags.slice(topGreenFlags.length).map((flag, idx) => (
+                      <span key={`g-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 text-[10px] font-medium">
+                        <Sparkles className="w-2.5 h-2.5 text-emerald-400 shrink-0" /> {flag}
                       </span>
                     ))}
-                    {dish.red_flags?.slice(topRedFlags.length).map((flag, idx) => (
-                      <span key={`r-${idx}`} className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[10px]">
-                        ⚠️ {flag}
+                    {redFlags.slice(topRedFlags.length).map((flag, idx) => (
+                      <span key={`r-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-400 text-[10px] font-medium">
+                        <span className="text-rose-500 text-[9px] shrink-0">⚠️</span> {flag}
                       </span>
                     ))}
                   </div>

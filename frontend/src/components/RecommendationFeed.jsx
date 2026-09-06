@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Trophy, Search, Download, CheckCircle2, AlertCircle, XCircle, Sparkles, Lightbulb, ShieldAlert, Filter, ArrowUpDown } from 'lucide-react';
+import { sanitizeDishFlags } from '../utils/flagUtils';
 
 export default function RecommendationFeed({ evalResult, evalLoading, onOpenProfile }) {
   const [activeTierFilter, setActiveTierFilter] = useState('ALL');
@@ -215,40 +216,49 @@ export default function RecommendationFeed({ evalResult, evalLoading, onOpenProf
                   <h3 className="text-base font-bold text-white mb-1.5 leading-snug">{dish.dish_name}</h3>
 
                   {/* Allergy Banner */}
-                  {dish.allergen_warnings && dish.allergen_warnings.length > 0 && (
-                    <div className="p-2.5 mb-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-start gap-1.5">
-                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-rose-200 font-bold">
-                        ⛔ HARD CONFLICT: {dish.allergen_warnings.join(', ')}
-                      </div>
-                    </div>
-                  )}
+                  {(() => {
+                    const { allergenWarnings: feedWarnings, greenFlags: feedGreens, redFlags: feedReds } = sanitizeDishFlags(dish);
+                    return (
+                      <>
+                        {feedWarnings.length > 0 && (
+                          <div className="p-2.5 mb-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-start gap-1.5">
+                            <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                            <div className="text-[11px] text-rose-200 font-bold">
+                              {feedWarnings.join(' • ')}
+                            </div>
+                          </div>
+                        )}
 
-                  {/* Summary */}
-                  <p className="text-xs text-slate-300 mb-3 leading-relaxed italic">
-                    "{dish.summary_reason}"
-                  </p>
+                        {/* Summary */}
+                        <p className="text-xs text-slate-300 mb-3 leading-relaxed italic">
+                          "{dish.summary_reason}"
+                        </p>
 
-                  {/* Tags */}
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {(dish.green_flags || []).map((flag, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-semibold flex items-center gap-1"
-                      >
-                        <Sparkles className="w-2.5 h-2.5 text-emerald-400" /> {flag}
-                      </span>
-                    ))}
+                        {/* Tags */}
+                        {(feedGreens.length > 0 || feedReds.length > 0) && (
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {feedGreens.slice(0, 2).map((flag, i) => (
+                              <span
+                                key={i}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium"
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-emerald-400 shrink-0" /> {flag}
+                              </span>
+                            ))}
 
-                    {(dish.red_flags || []).map((flag, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[10px] font-semibold flex items-center gap-1"
-                      >
-                        ⚠️ {flag}
-                      </span>
-                    ))}
-                  </div>
+                            {feedReds.slice(0, 2).map((flag, i) => (
+                              <span
+                                key={i}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-medium"
+                              >
+                                <span className="text-[9px] text-rose-400 shrink-0">⚠️</span> {flag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Chef Tip */}

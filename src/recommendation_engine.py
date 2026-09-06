@@ -307,10 +307,10 @@ class TieredFoodRecommender:
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
                     "summary_reason": reason,
-                    "matched_food_groups": [f"{meat} Poultry / Meat"],
+                    "matched_food_groups": [f"{meat} / Non-Veg"],
                     "green_flags": [],
-                    "red_flags": [f"Contains non-vegetarian animal ingredient: {meat.lower()}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({meat.lower()})"],
+                    "red_flags": [f"Animal meat protein ({meat.lower()})"],
+                    "allergen_warnings": [f"Non-Vegetarian ({meat.title()})"],
                     "customization_tips": tip,
                 }
 
@@ -326,8 +326,8 @@ class TieredFoodRecommender:
                     "summary_reason": f"Contains animal-derived dairy or egg ingredient ({item_name.lower()}), conflicting with vegan/dairy-free protocol.",
                     "matched_food_groups": ["Dairy / Egg Byproduct"],
                     "green_flags": [],
-                    "red_flags": [f"Contains animal byproduct: {item_name.lower()}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({item_name.lower()})"],
+                    "red_flags": [f"Animal dairy/egg byproduct ({item_name.lower()})"],
+                    "allergen_warnings": [f"Contains Dairy/Egg ({item_name.title()})"],
                     "customization_tips": f"Ask the kitchen for dairy-free coconut milk/cashew cream preparation or tofu substitution.",
                 }
 
@@ -360,8 +360,8 @@ class TieredFoodRecommender:
                         "summary_reason": f"Critical Allergen Alert: Recipe incorporates declared allergen '{allergy}' ({target}).",
                         "matched_food_groups": [f"Allergen: {allergy.title()}"],
                         "green_flags": [],
-                        "red_flags": [f"Zero-tolerance allergen detected: {allergy}"],
-                        "allergen_warnings": [f"Contains Declared Allergen: {allergy}"],
+                        "red_flags": [f"Contains declared {allergy.lower()}"],
+                        "allergen_warnings": [f"Contains {allergy.title()}"],
                         "customization_tips": f"Requires complete kitchen cross-contact isolation or choose a guaranteed {allergy}-free dish.",
                     }
 
@@ -606,6 +606,8 @@ CRITICAL INSTRUCTIONS FOR HIGH-CRAFT, BESPOKE ANALYSIS:
      - For Rotis: suggest "Request unbuttered 100% whole wheat tandoori roti rather than maida-based naan".
      - For Burgers: suggest "Request a spiced chickpea patty or grilled paneer steak on a whole wheat bun".
 5. HARD SAFETY VIOLATIONS: If a dish violates declared allergens or vegetarian/vegan restrictions, force Tier = "BAD", fit_score = 0, and describe the exact violation in 'allergen_warnings'.
+   - For dishes with violations or BAD tier: set 'green_flags': []. NEVER output 'None', 'N/A', or placeholder values in 'green_flags' or 'red_flags'.
+   - Do NOT duplicate allergen or dietary violation warnings in 'red_flags' if already specified in 'allergen_warnings'.
 
 Return ONLY valid JSON matching this schema:
 [
@@ -637,6 +639,37 @@ Return ONLY valid JSON matching this schema:
 
         dish_price_map = {d.get("name", "").lower(): d.get("price", "") for d in dishes}
 
+        def _clean_flag_list(flags: list, filter_against: list = None) -> List[str]:
+            if not flags:
+                return []
+            placeholders = {"none", "n/a", "na", "nil", "null", "no green flags", "no red flags", "none.", "not applicable"}
+            cleaned = []
+            seen = set()
+            for f in flags:
+                if not f or not isinstance(f, str):
+                    continue
+                s = re.sub(r"^[⛔⚠️✨✓🌿•\-*\s]+", "", f).strip()
+                if not s or s.lower() in placeholders:
+                    continue
+                s_lower = s.lower()
+                if s_lower in seen:
+                    continue
+                if filter_against:
+                    is_redundant = False
+                    for w in filter_against:
+                        w_low = w.lower()
+                        if s_lower in w_low or w_low in s_lower:
+                            is_redundant = True
+                            break
+                        if ("meat" in s_lower or "non-veg" in s_lower) and ("meat" in w_low or "non-veg" in w_low or "chicken" in w_low or "mutton" in w_low):
+                            is_redundant = True
+                            break
+                    if is_redundant:
+                        continue
+                seen.add(s_lower)
+                cleaned.append(s[0].upper() + s[1:] if len(s) > 1 else s.upper())
+            return cleaned
+
         results: List[TieredFoodRecommendation] = []
         for d in response_json:
             name = d.get("dish_name", "Unknown Dish")
@@ -651,8 +684,11 @@ Return ONLY valid JSON matching this schema:
                 score = 0
                 summary = d.get("summary_reason") if d.get("summary_reason") and len(d.get("summary_reason")) > 25 and "Classified based" not in d.get("summary_reason") else violation["summary_reason"]
                 tips = d.get("customization_tips") if d.get("customization_tips") and len(d.get("customization_tips")) > 20 else violation["customization_tips"]
-                warnings = list(dict.fromkeys(d.get("allergen_warnings", []) + violation["allergen_warnings"]))
-                reds = list(dict.fromkeys(d.get("red_flags", []) + violation["red_flags"]))
+                raw_warnings = violation.get("allergen_warnings", []) + d.get("allergen_warnings", [])
+                warnings = _clean_flag_list(raw_warnings)
+                raw_reds = violation.get("red_flags", []) + d.get("red_flags", [])
+                reds = _clean_flag_list(raw_reds, filter_against=warnings)
+                greens = []  # BAD tier dishes must never have positive green flags
             else:
                 if score >= self.good_threshold:
                     tier = FoodTier.GOOD
@@ -662,11 +698,13 @@ Return ONLY valid JSON matching this schema:
                     tier = FoodTier.BAD
                 summary = d.get("summary_reason", "Classified based on clinical nutritional matrix.")
                 tips = d.get("customization_tips")
-                warnings = d.get("allergen_warnings", [])
-                reds = list(d.get("red_flags", []))
+                warnings = _clean_flag_list(d.get("allergen_warnings", []))
+                greens = [] if tier == FoodTier.BAD else _clean_flag_list(d.get("green_flags", []))
+                red_candidates = list(d.get("red_flags", []))
                 if self.glycemic_sensitivity > 0.5 and any(w in full_dish_text.lower() for w in ["cake", "sweet", "meetha", "ice cream", "sugar", "syrup", "lava"]):
-                    if not any("sugar" in r.lower() or "carbohydrate" in r.lower() for r in reds):
-                        reds.append("High refined sugar and rapid-absorption carbohydrate content elevates glycemic risk")
+                    if not any("sugar" in r.lower() or "carbohydrate" in r.lower() for r in red_candidates):
+                        red_candidates.append("Elevated refined sugar content increases glycemic risk")
+                reds = _clean_flag_list(red_candidates, filter_against=warnings)
 
             results.append(
                 TieredFoodRecommendation(
@@ -675,7 +713,7 @@ Return ONLY valid JSON matching this schema:
                     fit_score=score,
                     summary_reason=summary,
                     matched_food_groups=d.get("matched_food_groups", []),
-                    green_flags=d.get("green_flags", []),
+                    green_flags=greens,
                     red_flags=reds,
                     allergen_warnings=warnings,
                     customization_tips=tips,
