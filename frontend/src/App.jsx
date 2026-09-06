@@ -327,28 +327,42 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Quick Tab Switcher */}
-            <button
-              onClick={() => setActiveMainTab(activeMainTab === 'MENU' ? 'CALENDAR' : 'MENU')}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
-            >
-              {activeMainTab === 'MENU' ? (
-                <>
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Calendar</span>
-                  {loggedMeals.length > 0 && (
-                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] flex items-center justify-center">
-                      {loggedMeals.length}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Salad className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Menu Scanner</span>
-                </>
-              )}
-            </button>
+            {/* Header Navigation Segmented Tabs */}
+            <div className="inline-flex p-1 bg-slate-100/90 rounded-full border border-slate-200 shadow-2xs">
+              <button
+                onClick={() => setActiveMainTab('MENU')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  activeMainTab === 'MENU'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Salad className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Menu Scanner</span>
+                {dishes.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                    {dishes.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('CALENDAR')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  activeMainTab === 'CALENDAR'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Monthly Calendar</span>
+                {loggedMeals.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                    {loggedMeals.length}
+                  </span>
+                )}
+              </button>
+            </div>
 
             {/* Active Plate Quick Opener */}
             <button
@@ -390,52 +404,6 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
-        {/* Top-Level Navigation Tabs: Menu Recommendations vs Monthly Calendar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-          <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
-            <button
-              onClick={() => setActiveMainTab('MENU')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeMainTab === 'MENU'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Salad className="w-4 h-4 text-emerald-600" />
-              <span>Menu Scanner & Recommendations</span>
-              {dishes.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
-                  {dishes.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveMainTab('CALENDAR')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeMainTab === 'CALENDAR'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Calendar className="w-4 h-4 text-emerald-600" />
-              <span>Monthly Calendar & Plan</span>
-              {loggedMeals.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
-                  {loggedMeals.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Daily Budget: <b className="text-slate-800 font-bold">{Math.round(userMatrix?.metabolic_targets?.target_calories_kcal || 2000)} kcal</b>
-            </span>
-          </div>
-        </div>
-
         {/* Tab 1: Menu Scanner & 3-Tier Recommendations */}
         {activeMainTab === 'MENU' && (
           <div className="space-y-8 animate-in fade-in duration-150">
