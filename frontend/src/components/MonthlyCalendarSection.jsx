@@ -33,6 +33,7 @@ export default function MonthlyCalendarSection({
   loggedMeals = [],
   onSaveMealToLog,
   onRemoveLoggedMeal,
+  onClearAllLoggedMeals,
   userMatrix,
   userProfile,
   dishes = [],
@@ -310,85 +311,6 @@ export default function MonthlyCalendarSection({
     setNewMealDishName('');
   };
 
-  // Sample Month Generator (High-value feature for instant exploration)
-  const handleGenerateSampleMonth = () => {
-    if (!onSaveMealToLog) return;
-    const isVeg = (userProfile?.dietary_preferences || []).some((d) => d.toLowerCase().includes('veg'));
-    const breakfastOptions = isVeg
-      ? [
-          { name: 'Oatmeal with Almond Milk & Berries', cal: 340, p: 12, c: 55, f: 8, na: 120 },
-          { name: 'Moong Dal Chilla with Mint Chutney', cal: 320, p: 16, c: 42, f: 9, na: 380 },
-          { name: 'Sprouted Bean Salad & Masala Chai', cal: 280, p: 14, c: 40, f: 6, na: 250 },
-        ]
-      : [
-          { name: 'Poached Eggs with Avocado on Whole Wheat', cal: 380, p: 22, c: 30, f: 18, na: 350 },
-          { name: 'Greek Yogurt with Walnuts & Honey', cal: 310, p: 20, c: 28, f: 12, na: 95 },
-        ];
-
-    const lunchOptions = isVeg
-      ? [
-          { name: 'Dal Tadka, Tandoori Roti & Cucumber Salad', cal: 580, p: 24, c: 85, f: 14, na: 520 },
-          { name: 'Paneer Tikka with Quinoa Pulao', cal: 620, p: 28, c: 70, f: 22, na: 580 },
-          { name: 'Rajma Chawal with Steamed Greens', cal: 590, p: 22, c: 92, f: 12, na: 610 },
-        ]
-      : [
-          { name: 'Grilled Chicken Breast with Brown Rice & Greens', cal: 560, p: 44, c: 55, f: 14, na: 480 },
-          { name: 'Tandoori Fish Tikka with Lemon Herb Salad', cal: 490, p: 40, c: 25, f: 16, na: 520 },
-        ];
-
-    const dinnerOptions = isVeg
-      ? [
-          { name: 'Stir-Fried Tofu with Asian Vegetables', cal: 450, p: 26, c: 35, f: 18, na: 460 },
-          { name: 'Lauki Channa Dal with Multigrain Phulka', cal: 420, p: 18, c: 62, f: 10, na: 410 },
-          { name: 'Warm Lentil Soup with Mixed Veggies', cal: 380, p: 19, c: 50, f: 9, na: 390 },
-        ]
-      : [
-          { name: 'Herb Roasted Salmon with Asparagus', cal: 520, p: 38, c: 18, f: 26, na: 380 },
-          { name: 'Clear Chicken Vegetable Wonton Soup', cal: 390, p: 32, c: 28, f: 10, na: 540 },
-        ];
-
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    // Pre-populate ~22 days
-    for (let day = 1; day <= daysInMonth; day++) {
-      if (day % 4 === 0) continue; // Skip a few days to simulate real life
-      const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      
-      const b = breakfastOptions[day % breakfastOptions.length];
-      const l = lunchOptions[(day + 1) % lunchOptions.length];
-      const d = dinnerOptions[(day + 2) % dinnerOptions.length];
-
-      // Breakfast
-      onSaveMealToLog({
-        id: `demo_${dateStr}_b`,
-        date: dateStr,
-        mealSlot: 'Breakfast',
-        timestamp: '08:30 AM',
-        items: [{ name: b.name, portion: 1.0, price: '' }],
-        nutrients: { calories: b.cal, protein: b.p, carbs: b.c, fat: b.f, sodium: b.na, fiber: 6 },
-      });
-
-      // Lunch
-      onSaveMealToLog({
-        id: `demo_${dateStr}_l`,
-        date: dateStr,
-        mealSlot: 'Lunch',
-        timestamp: '01:15 PM',
-        items: [{ name: l.name, portion: 1.0, price: '' }],
-        nutrients: { calories: l.cal, protein: l.p, carbs: l.c, fat: l.f, sodium: l.na, fiber: 9 },
-      });
-
-      // Dinner
-      onSaveMealToLog({
-        id: `demo_${dateStr}_d`,
-        date: dateStr,
-        mealSlot: 'Dinner',
-        timestamp: '07:45 PM',
-        items: [{ name: d.name, portion: 1.0, price: '' }],
-        nutrients: { calories: d.cal, protein: d.p, carbs: d.c, fat: d.f, sodium: d.na, fiber: 7 },
-      });
-    }
-  };
-
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* 1. Monthly Plan Health Dashboard Banner */}
@@ -408,7 +330,7 @@ export default function MonthlyCalendarSection({
             </p>
           </div>
 
-          {/* Month Navigation & Demo Actions */}
+          {/* Month Navigation & Clear Actions */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
               <button
@@ -437,14 +359,20 @@ export default function MonthlyCalendarSection({
               Today
             </button>
 
-            <button
-              onClick={handleGenerateSampleMonth}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition shadow-2xs cursor-pointer"
-              title="Pre-populate month with clinically balanced sample meals matching your matrix"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Demo Sample Plan</span>
-            </button>
+            {loggedMeals.length > 0 && onClearAllLoggedMeals && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Clear all logged meals from your calendar?')) {
+                    onClearAllLoggedMeals();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-slate-600 border border-slate-200 text-xs font-bold transition cursor-pointer"
+                title="Clear all recorded meals"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-rose-600" />
+                <span>Clear All Logs</span>
+              </button>
+            )}
           </div>
         </div>
 

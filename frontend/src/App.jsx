@@ -130,11 +130,21 @@ export default function App() {
   const [loggedMeals, setLoggedMeals] = useState(() => {
     try {
       const saved = localStorage.getItem('nutrimenu_daily_logged_meals');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      // Clean out any sample/demo meals so the calendar starts pristine
+      return Array.isArray(parsed) ? parsed.filter((m) => !m.id || !String(m.id).startsWith('demo_')) : [];
     } catch {
       return [];
     }
   });
+
+  const handleClearAllLoggedMeals = () => {
+    setLoggedMeals([]);
+    try {
+      localStorage.removeItem('nutrimenu_daily_logged_meals');
+    } catch {}
+  };
 
   const [dishes, setDishes] = useState([]);
   const [ocrLoading, setOcrLoading] = useState(false);
@@ -464,6 +474,7 @@ export default function App() {
             loggedMeals={loggedMeals}
             onSaveMealToLog={handleSaveMealToLog}
             onRemoveLoggedMeal={handleRemoveLoggedMeal}
+            onClearAllLoggedMeals={handleClearAllLoggedMeals}
             userMatrix={userMatrix}
             userProfile={profile}
             dishes={dishes}
