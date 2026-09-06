@@ -1,118 +1,191 @@
-import React from 'react';
-import { CheckCircle2, AlertCircle, XCircle, Sparkles, Lightbulb, ShieldAlert } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  CheckCircle2,
+  AlertCircle,
+  XCircle,
+  Sparkles,
+  Lightbulb,
+  ShieldAlert,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 export default function DishCard({ dish }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   const isGood = dish.tier === 'GOOD';
   const isMedium = dish.tier === 'MEDIUM';
-  const isBad = dish.tier === 'BAD';
 
   const tierStyles = isGood
     ? {
-        border: 'border-emerald-500/40 hover:border-emerald-400',
-        bg: 'bg-gradient-to-br from-emerald-950/20 via-slate-900/60 to-slate-900/40',
-        badgeBg: 'bg-emerald-500 text-slate-950',
-        badgeText: 'Tier 1: GOOD',
-        icon: <CheckCircle2 className="w-5 h-5 text-emerald-400" />,
-        shadow: 'hover:shadow-glow-green',
+        border: 'border-emerald-500/30 hover:border-emerald-400/60',
+        bg: 'bg-slate-900/70',
+        badgeBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+        dot: 'bg-emerald-400',
+        tierLabel: 'Tier 1: GOOD',
+        icon: <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />,
       }
     : isMedium
     ? {
-        border: 'border-amber-500/40 hover:border-amber-400',
-        bg: 'bg-gradient-to-br from-amber-950/20 via-slate-900/60 to-slate-900/40',
-        badgeBg: 'bg-amber-500 text-slate-950',
-        badgeText: 'Tier 2: MEDIUM',
-        icon: <AlertCircle className="w-5 h-5 text-amber-400" />,
-        shadow: 'hover:shadow-glow-amber',
+        border: 'border-amber-500/30 hover:border-amber-400/60',
+        bg: 'bg-slate-900/70',
+        badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+        dot: 'bg-amber-400',
+        tierLabel: 'Tier 2: MEDIUM',
+        icon: <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />,
       }
     : {
-        border: 'border-rose-500/40 hover:border-rose-400',
-        bg: 'bg-gradient-to-br from-rose-950/20 via-slate-900/60 to-slate-900/40',
-        badgeBg: 'bg-rose-500 text-white',
-        badgeText: 'Tier 3: BAD',
-        icon: <XCircle className="w-5 h-5 text-rose-400" />,
-        shadow: 'hover:shadow-glow-red',
+        border: 'border-rose-500/30 hover:border-rose-400/60',
+        bg: 'bg-slate-900/70',
+        badgeBg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+        dot: 'bg-rose-400',
+        tierLabel: 'Tier 3: BAD',
+        icon: <XCircle className="w-4 h-4 text-rose-400 shrink-0" />,
       };
+
+  const topGreenFlags = (dish.green_flags || []).slice(0, isGood ? 2 : 1);
+  const topRedFlags = (dish.red_flags || []).slice(0, isGood ? 1 : 2);
+  const hasMoreDetails =
+    dish.customization_tips ||
+    (dish.green_flags && dish.green_flags.length > topGreenFlags.length) ||
+    (dish.red_flags && dish.red_flags.length > topRedFlags.length) ||
+    dish.estimated_calories;
 
   return (
     <div
-      className={`rounded-3xl p-6 border transition-all duration-300 ${tierStyles.border} ${tierStyles.bg} ${tierStyles.shadow} backdrop-blur-xl flex flex-col justify-between`}
+      className={`rounded-2xl p-4 sm:p-5 border transition-all duration-200 ${tierStyles.border} ${tierStyles.bg} backdrop-blur-md flex flex-col justify-between gap-3 shadow-sm hover:shadow-md`}
     >
-      <div>
-        {/* Top Header with Badges */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2">
-            {tierStyles.icon}
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider ${tierStyles.badgeBg}`}>
-              {tierStyles.badgeText}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
+      <div className="space-y-2.5">
+        {/* Top Header: Title, Tier & Fit Score */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3
+              className="text-base font-bold text-white leading-snug truncate"
+              title={dish.dish_name}
+            >
+              {dish.dish_name}
+            </h3>
             {dish.price && (
-              <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
+              <span className="text-[11px] font-medium text-slate-400 mt-0.5 inline-block">
                 {dish.price}
               </span>
             )}
-            <span
-              className={`text-xs font-extrabold px-2.5 py-0.5 rounded-lg ${
-                isGood ? 'bg-emerald-500/20 text-emerald-300' : isMedium ? 'bg-amber-500/20 text-amber-300' : 'bg-rose-500/20 text-rose-300'
-              }`}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-bold ${tierStyles.badgeBg}`}
             >
-              Fit: {dish.fit_score}/100
-            </span>
+              <span className={`w-1.5 h-1.5 rounded-full ${tierStyles.dot}`} />
+              <span className="tabular-nums font-mono">{dish.fit_score}</span>
+              <span className="text-[10px] opacity-70">/100</span>
+            </div>
           </div>
         </div>
 
-        {/* Dish Title */}
-        <h3 className="text-lg font-bold text-white mb-2 leading-snug">{dish.dish_name}</h3>
-
         {/* Hard Exclusion Banner */}
         {dish.allergen_warnings && dish.allergen_warnings.length > 0 && (
-          <div className="p-3 mb-3 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-start gap-2">
-            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <div className="text-xs text-rose-200 font-bold">
-              ⛔ HARD CONFLICT: {dish.allergen_warnings.join(', ')}
+          <div className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2">
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <div className="text-[11px] text-rose-300 font-semibold truncate">
+              ⛔ {dish.allergen_warnings.join(', ')}
             </div>
           </div>
         )}
 
-        {/* Clinical / Dietary Summary */}
-        <p className="text-xs text-slate-300 mb-4 leading-relaxed italic">
-          "{dish.summary_reason}"
+        {/* Concise Clinical Assessment */}
+        <p className="text-xs text-slate-300 leading-relaxed line-clamp-2" title={dish.summary_reason}>
+          {dish.summary_reason}
         </p>
 
-        {/* Tags Grid */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {(dish.green_flags || []).map((flag, idx) => (
+        {/* Compact Key Tags (Max 2 for clean scanning) */}
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {topGreenFlags.map((flag, idx) => (
             <span
               key={idx}
-              className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold flex items-center gap-1"
+              className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-medium flex items-center gap-1"
+              title={flag}
             >
-              <Sparkles className="w-3 h-3 text-emerald-400" /> {flag}
+              <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+              <span className="truncate max-w-[130px]">{flag}</span>
             </span>
           ))}
 
-          {(dish.red_flags || []).map((flag, idx) => (
+          {topRedFlags.map((flag, idx) => (
             <span
               key={idx}
-              className="px-2.5 py-1 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-semibold flex items-center gap-1"
+              className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[10px] font-medium flex items-center gap-1"
+              title={flag}
             >
-              ⚠️ {flag}
+              <span className="text-[9px] text-rose-400">⚠️</span>
+              <span className="truncate max-w-[130px]">{flag}</span>
             </span>
           ))}
         </div>
-      </div>
 
-      {/* Chef Customization Callout */}
-      {dish.customization_tips && (
-        <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 flex items-start gap-2 mt-2">
-          <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-bold text-amber-300">Chef's Customization Advice:</span>{' '}
-            {dish.customization_tips}
+        {/* Expandable Chef Tip & Deep Details */}
+        {hasMoreDetails && (
+          <div className="pt-1 border-t border-slate-800/80">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-[11px] font-bold text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition-colors py-0.5 cursor-pointer"
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp className="w-3 h-3" /> Hide Chef Tip & Breakdown
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3 h-3" /> View Chef Tip & Breakdown
+                </>
+              )}
+            </button>
+
+            {isExpanded && (
+              <div className="mt-2 space-y-2 pt-1 text-xs animate-in fade-in duration-150">
+                {dish.customization_tips && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-[11px] flex items-start gap-1.5 leading-relaxed">
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-amber-300">Chef's Advice:</span>{' '}
+                      {dish.customization_tips}
+                    </div>
+                  </div>
+                )}
+
+                {dish.estimated_calories != null && (
+                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-[10px] text-slate-300 font-medium">
+                    <span>🔥 <b>{dish.estimated_calories}</b> kcal</span>
+                    <span>•</span>
+                    <span>P: <b>{dish.estimated_protein_g ?? '-'}g</b></span>
+                    <span>•</span>
+                    <span>C: <b>{dish.estimated_carbs_g ?? '-'}g</b></span>
+                    <span>•</span>
+                    <span>F: <b>{dish.estimated_fat_g ?? '-'}g</b></span>
+                  </div>
+                )}
+
+                {/* Remaining Tags */}
+                {(dish.green_flags?.length > topGreenFlags.length || dish.red_flags?.length > topRedFlags.length) && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {dish.green_flags?.slice(topGreenFlags.length).map((flag, idx) => (
+                      <span key={`g-${idx}`} className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px]">
+                        ✓ {flag}
+                      </span>
+                    ))}
+                    {dish.red_flags?.slice(topRedFlags.length).map((flag, idx) => (
+                      <span key={`r-${idx}`} className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[10px]">
+                        ⚠️ {flag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

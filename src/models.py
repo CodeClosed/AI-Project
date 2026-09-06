@@ -177,16 +177,23 @@ class RecognizedMenu:
     unclassified_items: List[MenuItem] = field(default_factory=list)
     raw_blocks: List[TextBlock] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    dishes: List[Any] = field(default_factory=list)
 
     @property
     def total_items(self) -> int:
-        return sum(len(s.items) for s in self.sections) + len(self.unclassified_items)
+        return len(self.to_flat_items())
 
     def to_flat_items(self) -> List[MenuItem]:
-        all_items = []
+        all_items: List[MenuItem] = []
         for s in self.sections:
             all_items.extend(s.items)
         all_items.extend(self.unclassified_items)
+        if not all_items and self.dishes:
+            for d in self.dishes:
+                if isinstance(d, MenuItem):
+                    all_items.append(d)
+                else:
+                    all_items.append(MenuItem(name=str(d), section="Menu Items", confidence=0.95))
         return all_items
 
     def get_all_items(self) -> List[MenuItem]:
@@ -205,7 +212,7 @@ class RecognizedMenu:
         names = []
         seen = set()
         for item in self.to_flat_items():
-            name = item.name.strip()
+            name = item.name.strip() if hasattr(item, "name") else str(item).strip()
             lower = name.lower()
             # Filter noise, single chars, bracket placeholders, and non-food lines
             if len(name) <= 1:

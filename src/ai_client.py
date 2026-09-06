@@ -80,6 +80,7 @@ class AIClient:
         self.openrouter_key = api_key or get_openrouter_api_key()
         self.openrouter_model = model_name or get_openrouter_model_name()
         self.base_url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
+        self.model_name = gemini_model if self.gemini_client.is_available() else self.openrouter_model
 
     def is_available(self) -> bool:
         """Returns True if Gemini or OpenRouter is configured with a valid key."""

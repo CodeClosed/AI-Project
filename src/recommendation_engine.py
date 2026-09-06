@@ -432,14 +432,53 @@ class TieredFoodRecommender:
 
         recommendations: List[TieredFoodRecommendation] = []
 
-        if self.is_available():
-            try:
-                recommendations = self._recommend_batch_ai(dishes)
-            except Exception as e:
-                logger.warning("[TieredFoodRecommender] Batch AI failed (%s), using deterministic engine.", e)
-                recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
-        else:
-            recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
+        # 1. Pre-check: Fast-track dishes with hard exclusions
+        pending_ai_dishes: List[Dict[str, Any]] = []
+        dish_map: Dict[str, Dict[str, Any]] = {}
+
+        for d in dishes:
+            d_name = d.get("name", "Unknown Item").strip()
+            dish_map[d_name.lower()] = d
+            full_text = f"{d_name} {d.get('description', '')} {' '.join(d.get('tags', []))}"
+            violation = self.check_hard_exclusions(full_text)
+            if violation:
+                recommendations.append(
+                    TieredFoodRecommendation(
+                        dish_name=d_name,
+                        tier=violation["tier"],
+                        fit_score=violation["fit_score"],
+                        summary_reason=violation["summary_reason"],
+                        matched_food_groups=violation["matched_food_groups"],
+                        green_flags=violation["green_flags"],
+                        red_flags=violation["red_flags"],
+                        allergen_warnings=violation["allergen_warnings"],
+                        customization_tips=violation["customization_tips"],
+                        price=d.get("price", ""),
+                    )
+                )
+            else:
+                pending_ai_dishes.append(d)
+
+        # 2. Evaluate remaining dishes via AI or deterministic fallback
+        if pending_ai_dishes:
+            if self.is_available():
+                try:
+                    ai_recs = self._recommend_batch_ai(pending_ai_dishes)
+                    recommendations.extend(ai_recs)
+                except Exception as e:
+                    logger.warning("[TieredFoodRecommender] Batch AI failed (%s), using deterministic engine.", e)
+                    recommendations.extend([self._recommend_dish_deterministic(d) for d in pending_ai_dishes])
+            else:
+                recommendations.extend([self._recommend_dish_deterministic(d) for d in pending_ai_dishes])
+
+        # 3. GUARANTEE: Ensure every single dish from the input is included (no dishes dropped)
+        evaluated_names = {r.dish_name.strip().lower() for r in recommendations}
+        for d in dishes:
+            d_name = d.get("name", "Unknown Item").strip()
+            if d_name.lower() not in evaluated_names:
+                rec = self._recommend_dish_deterministic(d)
+                recommendations.append(rec)
+                evaluated_names.add(d_name.lower())
 
         # Post-check: Enforce hard safety constraints across ALL recommendations
         validated_recs: List[TieredFoodRecommendation] = []
@@ -502,6 +541,35 @@ class TieredFoodRecommender:
 
     def _recommend_batch_ai(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
         """Classifies dishes into 3 tiers using Vision/Language AI with deep item-specific clinical reasoning."""
+        if not dishes:
+            return []
+
+        # If more than 15 dishes, process in chunks to prevent model output token truncation
+        chunk_size = 15
+        if len(dishes) > chunk_size:
+            all_results: List[TieredFoodRecommendation] = []
+            # Process up to 2 chunks (30 items) with AI to conserve token latency & free rate limits
+            max_ai_chunks = 2
+            for i in range(0, len(dishes), chunk_size):
+                chunk = dishes[i : i + chunk_size]
+                chunk_idx = i // chunk_size
+                if chunk_idx < max_ai_chunks:
+                    try:
+                        chunk_results = self._recommend_batch_ai_single(chunk)
+                        all_results.extend(chunk_results)
+                    except Exception as e:
+                        logger.warning("[TieredFoodRecommender] AI evaluation failed for chunk %d (%s), using deterministic.", chunk_idx, e)
+                        for d in chunk:
+                            all_results.append(self._recommend_dish_deterministic(d))
+                else:
+                    for d in chunk:
+                        all_results.append(self._recommend_dish_deterministic(d))
+            return all_results
+
+        return self._recommend_batch_ai_single(dishes)
+
+    def _recommend_batch_ai_single(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
+        """Evaluates a single chunk of dishes (up to 15 items) via LLM prompt."""
         prompt = f"""
 You are an elite Clinical Nutrition Scientist and Master Culinary Dietitian (The Middle Model).
 Evaluate each restaurant menu item against the user's specific clinical health profile and classify it into EXACTLY ONE of 3 TIERS:
@@ -595,7 +663,10 @@ Return ONLY valid JSON matching this schema:
                 summary = d.get("summary_reason", "Classified based on clinical nutritional matrix.")
                 tips = d.get("customization_tips")
                 warnings = d.get("allergen_warnings", [])
-                reds = d.get("red_flags", [])
+                reds = list(d.get("red_flags", []))
+                if self.glycemic_sensitivity > 0.5 and any(w in full_dish_text.lower() for w in ["cake", "sweet", "meetha", "ice cream", "sugar", "syrup", "lava"]):
+                    if not any("sugar" in r.lower() or "carbohydrate" in r.lower() for r in reds):
+                        reds.append("High refined sugar and rapid-absorption carbohydrate content elevates glycemic risk")
 
             results.append(
                 TieredFoodRecommendation(
@@ -778,6 +849,27 @@ Return ONLY valid JSON matching this schema:
 
         tier = FoodTier.GOOD if score >= self.good_threshold else (FoodTier.MEDIUM if score >= self.bad_threshold else FoodTier.BAD)
 
+        # Baseline macro heuristics based on dish profile
+        cal = 320
+        prot = 10
+        carbs = 42
+        fat = 12
+
+        if is_biryani:
+            cal, prot, carbs, fat = 520, 14, 75, 18
+        elif any(w in full_text for w in ["roti", "naan", "paratha", "bread", "phulka", "kulcha"]):
+            cal, prot, carbs, fat = 150, 4, 28, 2
+        elif any(w in full_text for w in ["salad", "soup", "sprouts", "cucumber"]):
+            cal, prot, carbs, fat = 110, 4, 15, 3
+        elif any(w in full_text for w in ["paneer", "tofu", "dal", "chana", "curry", "makhani"]):
+            cal, prot, carbs, fat = 350, 15, 22, 22
+        elif any(w in full_text for w in ["fries", "pakora", "samosa", "poori", "puri", "bhatura", "manchurian"]):
+            cal, prot, carbs, fat = 440, 7, 50, 24
+        elif any(w in full_text for w in ["cake", "sweet", "meetha", "ice cream", "gulab jamun", "brownie"]):
+            cal, prot, carbs, fat = 390, 4, 60, 16
+        elif any(w in full_text for w in ["diet coke", "zero sugar", "water"]):
+            cal, prot, carbs, fat = 0, 0, 0, 0
+
         return TieredFoodRecommendation(
             dish_name=name,
             tier=tier,
@@ -788,5 +880,9 @@ Return ONLY valid JSON matching this schema:
             red_flags=reds,
             allergen_warnings=allergen_alerts,
             customization_tips=customization,
+            estimated_calories=cal,
+            estimated_protein_g=prot,
+            estimated_carbs_g=carbs,
+            estimated_fat_g=fat,
             price=price,
         )

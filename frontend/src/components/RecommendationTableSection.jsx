@@ -47,7 +47,15 @@ export default function RecommendationTableSection({
   const [searchQuery, setSearchQuery] = useState('');
   const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
   const [isMatrixExpanded, setIsMatrixExpanded] = useState(true);
+  const [expandedCards, setExpandedCards] = useState({});
   const dropdownRef = useRef(null);
+
+  const toggleCardExpand = (cardKey) => {
+    setExpandedCards((prev) => ({
+      ...prev,
+      [cardKey]: !prev[cardKey],
+    }));
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -318,114 +326,198 @@ export default function RecommendationTableSection({
     triggerDownload(txt, 'nutrimenu_3tier_recommendations.txt', 'text/plain');
   };
 
-  // Render Card Item
+  // Render Decluttered Card Item
   const renderDishItem = (item, idx) => {
     const isGood = item.tier === 'GOOD';
     const isMedium = item.tier === 'MEDIUM';
+    const cardId = `${item.dish_name}-${idx}`;
+    const isExpanded = !!expandedCards[cardId];
 
-    const badgeClass = isGood
-      ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+    // Subtle border and badge styling
+    const tierStyles = isGood
+      ? {
+          cardBorder: 'border-emerald-100 hover:border-emerald-300 hover:shadow-emerald-500/5',
+          scoreBadge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          dot: 'bg-emerald-500',
+          tierLabel: 'Good',
+        }
       : isMedium
-      ? 'bg-amber-100 text-amber-900 border border-amber-300'
-      : 'bg-rose-100 text-rose-900 border border-rose-300';
+      ? {
+          cardBorder: 'border-amber-100 hover:border-amber-300 hover:shadow-amber-500/5',
+          scoreBadge: 'bg-amber-50 text-amber-700 border-amber-200',
+          dot: 'bg-amber-500',
+          tierLabel: 'Medium',
+        }
+      : {
+          cardBorder: 'border-rose-100 hover:border-rose-300 hover:shadow-rose-500/5',
+          scoreBadge: 'bg-rose-50 text-rose-700 border-rose-200',
+          dot: 'bg-rose-500',
+          tierLabel: 'Avoid',
+        };
 
-    const borderClass = isGood
-      ? 'border-emerald-200 hover:border-emerald-400 bg-white'
-      : isMedium
-      ? 'border-amber-200 hover:border-amber-400 bg-white'
-      : 'border-rose-200 hover:border-rose-400 bg-white';
+    const topGreenFlags = (item.green_flags || []).slice(0, isGood ? 2 : 1);
+    const topRedFlags = (item.red_flags || []).slice(0, isGood ? 1 : 2);
+    const hasMoreDetails =
+      item.customization_tips ||
+      (item.green_flags && item.green_flags.length > topGreenFlags.length) ||
+      (item.red_flags && item.red_flags.length > topRedFlags.length) ||
+      item.estimated_calories;
 
     return (
       <div
-        key={idx}
-        className={`p-4 rounded-2xl border ${borderClass} shadow-xs transition-all hover:shadow-md flex flex-col justify-between gap-3`}
+        key={cardId}
+        className={`rounded-2xl border ${tierStyles.cardBorder} bg-white p-4 shadow-xs transition-all duration-200 hover:shadow-md flex flex-col justify-between gap-3 text-slate-800`}
       >
-        <div className="space-y-2">
-          {/* Header row: Name, price, and score badge */}
+        <div className="space-y-2.5">
+          {/* Top Row: Title, Price & Compact Score */}
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <div className="font-bold text-slate-900 text-sm leading-snug">{item.dish_name}</div>
+            <div className="min-w-0 flex-1">
+              <h4
+                className="font-bold text-slate-900 text-sm leading-snug truncate"
+                title={item.dish_name}
+              >
+                {item.dish_name}
+              </h4>
               {item.price && (
-                <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-emerald-800 border border-slate-200 tabular-nums">
+                <span className="inline-block mt-0.5 text-[11px] font-medium text-slate-500 tabular-nums">
                   {item.price}
                 </span>
               )}
             </div>
-            <div className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${badgeClass}`}>
-              {isGood ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
-              ) : isMedium ? (
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
-              ) : (
-                <XCircle className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
-              )}
-              <span className="tabular-nums font-mono">{item.fit_score}/100</span>
+
+            {/* Compact Fit Score Pill */}
+            <div
+              className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-bold ${tierStyles.scoreBadge}`}
+              title={`Fit Score: ${item.fit_score}/100 (${tierStyles.tierLabel})`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${tierStyles.dot}`} />
+              <span className="tabular-nums font-mono">{item.fit_score}</span>
+              <span className="text-[9px] opacity-70">/100</span>
             </div>
           </div>
 
-          {/* Clinical Assessment Reason */}
-          <p className="text-xs text-slate-700 leading-relaxed italic bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-            "{item.summary_reason}"
-          </p>
-
-          {/* Allergen & Dietary Warnings */}
+          {/* Conflict / Allergen Alert (Sleek, Not Clunky) */}
           {item.allergen_warnings && item.allergen_warnings.length > 0 && (
-            <div className="px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-900 border border-rose-200 text-[11px] font-bold flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-              <span>⛔ {item.allergen_warnings.join(', ')}</span>
+            <div className="px-2 py-1 rounded-lg bg-rose-50/80 border border-rose-200/80 text-rose-800 text-[11px] font-semibold flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+              <span className="truncate">{item.allergen_warnings.join(', ')}</span>
             </div>
           )}
 
-          {/* Green & Red Flags */}
-          <div className="flex flex-wrap gap-1 pt-1">
-            {(item.green_flags || []).map((flag, i) => (
+          {/* Primary Rationale (Clean, No quotes, 2-line clamp) */}
+          <p className="text-xs text-slate-600 leading-relaxed line-clamp-2" title={item.summary_reason}>
+            {item.summary_reason}
+          </p>
+
+          {/* Key Nutritional Chips (Max 2 chips for decluttered scan) */}
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {topGreenFlags.map((flag, i) => (
               <span
                 key={i}
-                className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold flex items-center gap-0.5"
+                className="px-2 py-0.5 rounded-md bg-emerald-50/70 border border-emerald-100 text-emerald-700 text-[10px] font-medium flex items-center gap-1"
+                title={flag}
               >
-                <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> {flag}
+                <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
+                <span className="truncate max-w-[140px]">{flag}</span>
               </span>
             ))}
-            {(item.red_flags || []).map((flag, i) => (
+            {topRedFlags.map((flag, i) => (
               <span
                 key={i}
-                className="px-2 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-semibold"
+                className="px-2 py-0.5 rounded-md bg-rose-50/70 border border-rose-100 text-rose-700 text-[10px] font-medium flex items-center gap-1"
+                title={flag}
               >
-                ⚠️ {flag}
+                <span className="text-rose-500 text-[9px]">⚠️</span>
+                <span className="truncate max-w-[140px]">{flag}</span>
               </span>
             ))}
           </div>
+
+          {/* Interactive Expand / Collapse for Deep Details */}
+          {hasMoreDetails && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => toggleCardExpand(cardId)}
+                className="text-[11px] font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1 transition-colors py-0.5 cursor-pointer"
+              >
+                {isExpanded ? (
+                  <>
+                    <ChevronUp className="w-3 h-3" /> Hide Details
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3 h-3" /> Chef Tip & Breakdown
+                  </>
+                )}
+              </button>
+
+              {/* Collapsed Drawer */}
+              {isExpanded && (
+                <div className="mt-2 space-y-2 pt-2 border-t border-slate-100 text-xs animate-in fade-in duration-150">
+                  {item.customization_tips && (
+                    <div className="p-2 rounded-xl bg-amber-50/80 border border-amber-200/80 text-amber-950 text-[11px] flex items-start gap-1.5">
+                      <Lightbulb className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="leading-relaxed">
+                        <span className="font-bold text-amber-900">Chef's Advice:</span>{' '}
+                        {item.customization_tips}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Estimated Macros if available */}
+                  {item.estimated_calories != null && (
+                    <div className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-50 border border-slate-100 text-[10px] text-slate-600 font-medium">
+                      <span>🔥 <b>{item.estimated_calories}</b> kcal</span>
+                      <span>•</span>
+                      <span>P: <b>{item.estimated_protein_g ?? '-'}g</b></span>
+                      <span>•</span>
+                      <span>C: <b>{item.estimated_carbs_g ?? '-'}g</b></span>
+                      <span>•</span>
+                      <span>F: <b>{item.estimated_fat_g ?? '-'}g</b></span>
+                    </div>
+                  )}
+
+                  {/* Full Flags List */}
+                  {(item.green_flags?.length > topGreenFlags.length || item.red_flags?.length > topRedFlags.length) && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.green_flags?.slice(topGreenFlags.length).map((flag, i) => (
+                        <span key={`g-${i}`} className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px]">
+                          ✓ {flag}
+                        </span>
+                      ))}
+                      {item.red_flags?.slice(topRedFlags.length).map((flag, i) => (
+                        <span key={`r-${i}`} className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px]">
+                          ⚠️ {flag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Customization Tip */}
-        {item.customization_tips && (
-          <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-700">
-            <div className="p-2 rounded-xl bg-amber-50/90 border border-amber-200 text-slate-800 flex items-start gap-1.5">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-amber-900">Chef's Advice:</span> {item.customization_tips}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Add to Plate Action Button */}
+        {/* Add to Plate Action Button (Clean, Uncluttered) */}
         {onAddToPlate && (
           <div className="pt-2 border-t border-slate-100">
             {(() => {
               const plateItem = plate.find((p) => p.name.toLowerCase() === item.dish_name.toLowerCase());
               return plateItem ? (
                 <button
+                  type="button"
                   onClick={() => onAddToPlate({ name: item.dish_name, price: item.price })}
-                  className="w-full py-2 px-3 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs"
+                  className="w-full py-1.5 px-3 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>On Plate ({plateItem.portion || 1}x) • Add +1</span>
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => onAddToPlate({ name: item.dish_name, price: item.price })}
-                  className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer"
+                  className="w-full py-1.5 px-3 rounded-xl bg-slate-50 hover:bg-emerald-600 hover:text-white border border-slate-200/80 text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition active:scale-[0.98] cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add to Plate</span>

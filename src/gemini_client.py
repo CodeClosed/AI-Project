@@ -166,18 +166,17 @@ class GeminiClient:
 
                     if resp.status_code == 429:
                         last_err = GeminiRateLimitError(f"Gemini rate limit exceeded (HTTP 429): {resp.text}")
-                        wait = 0.5 * attempt
-                        logger.warning("Gemini rate limit (HTTP 429). Retrying in %.1fs...", wait)
-                        time.sleep(wait)
-                        continue
+                        logger.warning("Gemini model '%s' rate limited (HTTP 429), switching to next fallback model.", model)
+                        break
 
                     # Server error (5xx)
                     if 500 <= resp.status_code < 600:
                         last_err = GeminiAPIError(f"Gemini server error (HTTP {resp.status_code}): {resp.text}")
-                        wait = 0.5 * attempt
-                        logger.warning("Gemini server error %s. Retrying in %.1fs...", resp.status_code, wait)
-                        time.sleep(wait)
-                        continue
+                        if attempt == 1:
+                            time.sleep(0.3)
+                            continue
+                        logger.warning("Gemini model '%s' server error %s, switching to next fallback model.", model, resp.status_code)
+                        break
 
                     raise GeminiAPIError(f"Gemini API returned error {resp.status_code}: {resp.text}")
 

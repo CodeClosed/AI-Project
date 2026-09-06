@@ -86,20 +86,16 @@ async def extract_menu_from_image(
         pipeline = MenuRecognitionPipeline(api_key=effective_api_key)
         recognized_menu = pipeline.process_image(tmp_path)
 
-        raw_dishes = []
-        if hasattr(recognized_menu, "get_item_names") and callable(recognized_menu.get_item_names):
-            raw_dishes = recognized_menu.get_item_names()
-        elif hasattr(recognized_menu, "to_flat_items") and callable(recognized_menu.to_flat_items):
-            raw_dishes = [item.name for item in recognized_menu.to_flat_items()]
+        flat_items = recognized_menu.to_flat_items()
 
-        # Filter out day names, timetable headers, time strings, and noise
         flattened_dishes = []
         seen = set()
 
-        for dish in raw_dishes:
-            tokenized = tokenize_food_item(str(dish))
-            for clean_name in tokenized:
-                # Strip leading day names or slot names
+        for item in flat_items:
+            item_str = item.name if hasattr(item, "name") else str(item)
+            parts = re.split(r'[,/\n;]', item_str)
+            for part in parts:
+                clean_name = part.strip()
                 clean_name = re.sub(
                     r'^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Breakfast|Lunch|Snacks|Dinner)\s*[:\-]?\s*', 
                     '', 
@@ -107,24 +103,19 @@ async def extract_menu_from_image(
                     flags=re.IGNORECASE
                 ).strip()
 
-                if not clean_name or len(clean_name) <= 1 or clean_name.isdigit():
-                    continue
+                if clean_name and len(clean_name) > 1 and not clean_name.isdigit():
+                    title_name = clean_name.title()
+                    if title_name.lower() not in seen:
+                        seen.add(title_name.lower())
+                        flattened_dishes.append(title_name)
 
-                valid, _ = is_valid_food_item(clean_name, allow_beverages=True)
-                if not valid:
-                    continue
-
-                if clean_name.lower() not in seen:
-                    seen.add(clean_name.lower())
-                    flattened_dishes.append(clean_name.title())
-
-        # Fallback to direct flat items if list is empty
-        if not flattened_dishes and hasattr(recognized_menu, "to_flat_items"):
-            for item in recognized_menu.to_flat_items():
-                name = item.name.strip().title()
-                if name.lower() not in seen:
-                    seen.add(name.lower())
-                    flattened_dishes.append(name)
+        # Fallback to get_item_names if flattened_dishes is empty
+        if not flattened_dishes and hasattr(recognized_menu, "get_item_names"):
+            for item in recognized_menu.get_item_names():
+                title_name = str(item).strip().title()
+                if title_name.lower() not in seen:
+                    seen.add(title_name.lower())
+                    flattened_dishes.append(title_name)
 
         formatted_dishes = [
             {"id": idx + 1, "name": item, "section": "Menu Items"}
@@ -216,7 +207,7 @@ async def evaluate_recommendations(req: Dict[str, Any]):
             continue
 
         valid, _ = is_valid_food_item(name, allow_beverages=True)
-        if not valid:
+        if not valid and (len(name) < 2 or not any(c.isalpha() for c in name)):
             continue
 
         seen.add(name.lower())

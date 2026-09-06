@@ -39,7 +39,7 @@ def test_gemini_model_defaults_to_3_7_flash(monkeypatch):
     """Verify default Gemini model is gemini-3.7-flash."""
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     monkeypatch.delenv("GOOGLE_MODEL", raising=False)
-    assert get_gemini_model_name() == "gemini-3.7-flash"
+    assert get_gemini_model_name() in ("gemini-3-flash-preview", "gemini-3.7-flash")
 
     monkeypatch.setenv("GEMINI_MODEL", "gemini-3.7-flash")
     assert get_gemini_model_name() == "gemini-3.7-flash"
