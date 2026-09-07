@@ -88,13 +88,13 @@ export default function Step1MenuUpload({ dishes, setDishes, onNext }) {
       {/* Hero Header */}
       <div className="text-center mb-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">
-          <Sparkles className="w-3.5 h-3.5" /> Model 1: Visual Menu Intelligence
+          <Sparkles className="w-3.5 h-3.5" /> Step 1: Visual Menu Scanner
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-blue-400">
           Upload & Scan Restaurant Menu
         </h1>
         <p className="text-slate-400 text-sm sm:text-base mt-2 max-w-xl mx-auto">
-          Drop any menu photo or scan. Deep learning OCR automatically extracts dish names, prices, categories, and strips ambient noise.
+          Drop any menu photo or scan. Automatically extracts dish names, prices, categories, and strips ambient noise.
         </p>
       </div>
 

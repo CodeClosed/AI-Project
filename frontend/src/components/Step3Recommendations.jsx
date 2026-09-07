@@ -70,7 +70,7 @@ export default function Step3Recommendations({
       {/* Header */}
       <div className="text-center mb-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">
-          <Sparkles className="w-3.5 h-3.5" /> Model 3: Personalized 3-Tier Matchmaker
+          <Sparkles className="w-3.5 h-3.5" /> Step 3: Personalized 3-Tier Matchmaker
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-blue-400">
           3-Tier Nutritional Recommendations

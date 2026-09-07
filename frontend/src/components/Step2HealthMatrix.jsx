@@ -85,7 +85,7 @@ export default function Step2HealthMatrix({
       {/* Header */}
       <div className="text-center mb-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold mb-3">
-          <Sparkles className="w-3.5 h-3.5" /> Model 2: Personalized Health Matrix Studio
+          <Sparkles className="w-3.5 h-3.5" /> Step 2: Personalized Health Matrix Studio
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-teal-300 to-emerald-400">
           Biometrics & Clinical Guardrails

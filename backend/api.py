@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="NutriMenu AI API",
-    description="Backend service for Gemini 3.7 Flash OCR menu extraction, metabolic matrix synthesis, and personalized 3-tier food recommendations.",
+    description="Backend service for menu OCR extraction, metabolic matrix synthesis, and personalized 3-tier food recommendations.",
     version="1.0.0"
 )
 
