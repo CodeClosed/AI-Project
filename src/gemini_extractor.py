@@ -1,44 +1,96 @@
 """
-Intelligent Menu Extractor powered by Google Gemini Vision API.
-Provides zero-shot semantic understanding, automatic OCR typo correction,
-and structured menu hierarchy extraction with calibrated confidence scoring.
+Gemini Multimodal Vision Menu Extractor for NutriMenu AI.
+Performs end-to-end vision transcription, OCR typo correction, table grid parsing,
+and noise filtering using Google Gemini (defaulting to Gemini 3.7 Flash).
 """
 
-from typing import List, Dict, Any, Optional, Union, Tuple
-import os
+import io
 import re
 import json
 import base64
-import io
 import logging
+from typing import List, Dict, Any, Optional, Union, Tuple
 from pathlib import Path
-import numpy as np
 from PIL import Image
-import cv2
+import numpy as np
+import requests
 
-from .config import get_gemini_api_key, get_gemini_model_name
 from .gemini_client import GeminiClient, GeminiAPIError
+from .noise_filter import AdvancedNoiseFilter, is_valid_food_item
 from .models import RecognizedMenu, MenuSection, MenuItem, BoundingBox
+from .config import get_gemini_api_key, get_gemini_model_name
 
 logger = logging.getLogger(__name__)
 
 
+def tokenize_food_item(raw_name: str) -> List[str]:
+    """
+    Splits compound food strings (separated by commas, slashes, or 'and')
+    into individual clean food item strings, filtering out non-food headers.
+    """
+    if not raw_name:
+        return []
+
+    # Strip bracketed text
+    text = re.sub(r'\([^)]*\)', '', raw_name)
+    parts = re.split(r'[,/;\n]', text)
+
+    excluded_headers = {
+        "BREAKFAST", "LUNCH", "SNACKS", "DINNER",
+        "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY",
+        "NOTE", "TIMINGS", "MENU", "TODAY", "SPECIAL", "NAME", "LOCATION",
+        "INSERT YOUR LOCATION HERE", "RESTAURANT NAME", "ORDER NOW"
+    }
+
+    clean_items = []
+    for part in parts:
+        item = part.strip()
+        item = re.sub(r'^[\-\*\•\.\d\:\s]+', '', item).strip()
+
+        if not item or item.upper() in excluded_headers:
+            continue
+
+        # Strip time ranges like 7:30 AM - 9:15 AM
+        if re.search(r'\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)', item):
+            continue
+
+        # Split 'and' if multiple distinct dishes are joined
+        if ' and ' in item.lower() and not any(k in item.lower() for k in ['rice and', 'dal and', 'mac and', 'bread and', 'chips and']):
+            sub_parts = re.split(r'\s+and\s+', item, flags=re.IGNORECASE)
+            for sp in sub_parts:
+                sp_clean = sp.strip()
+                valid, _ = is_valid_food_item(sp_clean, allow_beverages=True)
+                if valid and len(sp_clean) > 1:
+                    clean_items.append(sp_clean.title())
+        else:
+            valid, _ = is_valid_food_item(item, allow_beverages=True)
+            if valid and len(item) > 1:
+                clean_items.append(item.title())
+
+    return clean_items
+
+
 class GeminiMenuExtractor:
-    """Extracts structured menu items, categories, and prices using Google Gemini Flash."""
+    """
+    Multimodal Vision Menu Extractor powered by Google Gemini (Gemini 3.7 Flash).
+    """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
         gemini_client: Optional[GeminiClient] = None,
+        allow_beverages: bool = True,
     ):
         self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.allow_beverages = allow_beverages
+        self.noise_filter = AdvancedNoiseFilter()
 
     def is_available(self) -> bool:
         """Returns True if a valid Gemini API key is configured."""
         return self.gemini_client.is_available()
 
-    def _prepare_base64_image(self, image_input: Union[str, np.ndarray, Image.Image, io.BytesIO]) -> Tuple[str, int, int]:
+    def _prepare_base64_image(self, image_input: Union[str, np.ndarray, Image.Image, io.BytesIO, Path]) -> Tuple[str, int, int]:
         """Converts image input to base64 JPEG string and returns (b64_string, width, height)."""
         if isinstance(image_input, Image.Image):
             pil_img = image_input.convert("RGB")
@@ -46,6 +98,7 @@ class GeminiMenuExtractor:
             image_input.seek(0)
             pil_img = Image.open(image_input).convert("RGB")
         elif isinstance(image_input, np.ndarray):
+            import cv2
             if len(image_input.shape) == 2:
                 rgb = cv2.cvtColor(image_input, cv2.COLOR_GRAY2RGB)
             elif image_input.shape[2] == 4:
@@ -61,10 +114,11 @@ class GeminiMenuExtractor:
             raise TypeError(f"Unsupported image input type: {type(image_input)}")
 
         w, h = pil_img.size
-        # Resize if huge to speed up upload
-        if max(w, h) > 2000:
-            scale = 2000.0 / max(w, h)
+        # Resize if huge to optimize latency
+        if max(w, h) > 2048:
+            scale = 2048.0 / max(w, h)
             pil_img = pil_img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+            w, h = pil_img.size
 
         buffer = io.BytesIO()
         pil_img.save(buffer, format="JPEG", quality=90)
@@ -72,53 +126,53 @@ class GeminiMenuExtractor:
         return b64_str, w, h
 
     def _calculate_confidence(self, name: str, price: Optional[float], desc: Optional[str], section: Optional[str]) -> float:
-        """
-        Calibrates item extraction confidence based on completeness and semantic coherence.
-        Replaces artificial 1.0 confidence with a realistic score.
-        """
-        score = 0.70
+        """Calibrates item extraction confidence based on completeness and semantic coherence."""
+        score = 0.85
         if name and len(name) >= 3:
-            score += 0.10
-        if price is not None and 0.5 <= price <= 5000:
-            score += 0.10
+            score += 0.08
         if desc and len(desc) > 5:
-            score += 0.05
-        if section and section.lower() not in ("general", "other", "unknown"):
             score += 0.04
-        return min(0.98, max(0.40, score))
+        if section and section.lower() not in ("general", "other", "unknown"):
+            score += 0.03
+        return min(0.99, max(0.60, score))
 
-    def extract_menu(self, image_input: Union[str, np.ndarray, Image.Image, io.BytesIO]) -> RecognizedMenu:
+    def extract_menu(self, image_input: Union[str, np.ndarray, Image.Image, io.BytesIO, Path]) -> RecognizedMenu:
         """
-        Processes a restaurant menu image with Gemini Flash and returns a structured RecognizedMenu object.
+        Processes a restaurant or college mess menu image with Gemini Flash and returns a structured RecognizedMenu object.
         """
         b64_img, img_w, img_h = self._prepare_base64_image(image_input)
 
         prompt = """
-You are an expert culinary AI specializing in restaurant menu digitization.
-Analyze this menu image and extract ALL genuine food and beverage dishes with complete accuracy.
+You are an expert culinary AI specializing in restaurant and university mess menu digitization.
+Analyze this menu image and extract ALL individual food and beverage items with complete accuracy.
 
-CRITICAL EXTRACTION RULES:
-1. Extract ALL REAL food & beverage dishes (starters, burgers, pizzas, rolls, sandwiches, mains, combos, sides, desserts, drinks).
-2. Group items into their proper section categories (e.g. Fries, Burgers, Rolls, Sandwiches, Chinese, Noodles, Appetizers, Entrées, Pasta, Dinner Specials, Combos, Desserts, Beverages).
-3. If an item name has stylized/misrecognized characters or OCR typos in the image, fix and return the CORRECT culinary spelling.
-4. Distinguish category headers from dish names (e.g., 'Burger', 'Sandwich', 'Roll', 'Fries', 'Bun', 'Appetizers', 'Entrées', 'Dinner Specials' are section categories, NOT food items).
-5. If an item has an add-on or customization note (e.g. '(with cheese additional Rs 10)'), attach it to the item's 'description' field.
-6. For combo meals (e.g. 'Chicken Burger Combo' with 'Burger, Fries and spl lemon juice'), set 'name' to the combo title and 'description' to the inclusions.
-7. Exclude all non-food noise (restaurant branding, slogans, logos, table numbers, phone numbers, addresses, GST/tax notices, opening hours, footer text).
+CRITICAL EXTRACTION & TABLE GRID RULES:
+1. IF THIS IS A TABLE / TIMETABLE GRID (e.g. Days across columns, Meal slots across rows):
+   - Treat EVERY CELL independently.
+   - NEVER combine text horizontally across multiple columns into one item.
+   - Extract dishes individually cell by cell across all days and meal slots.
+2. DISH TOKENIZATION & SPLITTING:
+   - If a cell or line contains multiple items separated by commas, slashes (/), 'and', or newlines (e.g. 'Dosa, Sambhar, Chutney' or 'Veg Biryani/Egg Biryani'), EXTRACT EACH DISH AS A SEPARATE INDIVIDUAL ITEM IN THE JSON.
+3. EXCLUDE TABLE HEADERS & NOISE:
+   - Exclude column/row headers (e.g., 'Monday', 'Tuesday', 'Breakfast', 'Lunch', 'Snacks', 'Dinner', time ranges like '7:30 AM - 9:15 AM', '10:00 AM - 11:00 PM').
+   - Exclude document headers, notices, template placeholders, footer notes (e.g., 'SRM UNIVERSITY', 'NOTE:', 'THIS MENU WILL BE...', 'INSERT YOUR LOCATION HERE', 'NAME', 'RESTAURANT NAME', 'ORDER NOW').
+4. SPELLING FIXES:
+   - Fix OCR spelling errors (e.g. fix 'Tdly' to 'Idli', 'Pillka' to 'Phulka', 'Rajama' to 'Rajma', 'Wkk' to 'Milk', 'Hasala' to 'Masala', 'Panner' to 'Paneer').
 
-Return ONLY valid JSON with this exact structure:
+Return ONLY valid JSON matching this exact structure:
 {
+  "restaurant_name": "Restaurant / Mess Name if visible",
   "sections": [
     {
-      "category": "Category Title",
+      "category": "Section or Meal Name (e.g. Breakfast, Lunch, Snacks, Dinner, Appetizers, Mains, Desserts)",
       "items": [
         {
-          "name": "Exact Correct Food Name",
-          "price": 60.0,
-          "raw_price": "Rs 60",
-          "currency": "Rs",
-          "description": "Optional description or add-on details",
-          "dietary_tags": ["Vegetarian", "Spicy"]
+          "name": "Single Individual Food Item Name",
+          "price": null,
+          "raw_price": null,
+          "currency": null,
+          "description": "",
+          "dietary_tags": []
         }
       ]
     }
@@ -139,48 +193,73 @@ Return ONLY valid JSON with this exact structure:
         sections: List[MenuSection] = []
         seen_items = set()
 
-        for sec_data in response_json.get("sections", []):
-            cat_title = str(sec_data.get("category", "General")).strip()
+        raw_sections = response_json.get("sections") or []
+        for sec_data in raw_sections:
+            cat_title = str(sec_data.get("category") or sec_data.get("title") or "General").strip()
             sec_items: List[MenuItem] = []
 
             for it_data in sec_data.get("items", []):
-                name = str(it_data.get("name", "")).strip()
-                if not name:
+                raw_name = str(it_data.get("name", "")).strip()
+                if not raw_name:
                     continue
 
-                item_key = (name.lower(), cat_title.lower())
-                if item_key in seen_items:
-                    continue
-                seen_items.add(item_key)
+                # Tokenize and split any compound items returned in raw_name
+                individual_names = tokenize_food_item(raw_name)
 
-                price_val = it_data.get("price")
-                if price_val is not None:
-                    try:
-                        price_val = float(price_val)
-                    except (ValueError, TypeError):
-                        price_val = None
+                for name in individual_names:
+                    item_key = name.lower()
+                    if item_key in seen_items:
+                        continue
+                    seen_items.add(item_key)
 
-                raw_price = it_data.get("raw_price")
-                currency = it_data.get("currency")
-                desc = it_data.get("description")
-                dietary = it_data.get("dietary_tags", []) or []
+                    price_val = it_data.get("price")
+                    if price_val is not None:
+                        try:
+                            price_val = float(price_val)
+                        except (ValueError, TypeError):
+                            price_val = None
 
-                conf = self._calculate_confidence(name, price_val, desc, cat_title)
+                    raw_price = it_data.get("raw_price")
+                    currency = it_data.get("currency")
+                    desc = it_data.get("description", "")
+                    dietary = it_data.get("dietary_tags", []) or []
 
-                menu_item = MenuItem(
-                    name=name,
-                    price=price_val,
-                    raw_price=raw_price,
-                    currency=currency,
-                    description=desc,
-                    section=cat_title,
-                    dietary_tags=dietary,
-                    confidence=conf,
-                )
-                sec_items.append(menu_item)
+                    conf = self._calculate_confidence(name, price_val, desc, cat_title)
+
+                    menu_item = MenuItem(
+                        name=name,
+                        price=price_val,
+                        raw_price=str(raw_price) if raw_price else None,
+                        currency=currency,
+                        description=desc,
+                        section=cat_title,
+                        dietary_tags=dietary,
+                        confidence=conf,
+                    )
+                    sec_items.append(menu_item)
 
             if sec_items:
                 sections.append(MenuSection(title=cat_title, items=sec_items))
+
+        # Handle flat food_items if returned
+        if not sections and response_json.get("food_items"):
+            flat_items: List[MenuItem] = []
+            for fi in response_json["food_items"]:
+                raw_name = str(fi.get("name", "")).strip()
+                for name in tokenize_food_item(raw_name):
+                    if name.lower() in seen_items:
+                        continue
+                    seen_items.add(name.lower())
+                    flat_items.append(
+                        MenuItem(
+                            name=name,
+                            price=float(fi["price"]) if fi.get("price") is not None else None,
+                            section=fi.get("section", "General"),
+                            confidence=0.90,
+                        )
+                    )
+            if flat_items:
+                sections.append(MenuSection(title="Menu Items", items=flat_items))
 
         image_path_str = str(image_input) if isinstance(image_input, (str, Path)) else "in_memory_image"
         return RecognizedMenu(
@@ -193,3 +272,12 @@ Return ONLY valid JSON with this exact structure:
             raw_blocks=[],
             metadata={"extractor": "Gemini-Flash", "model": self.gemini_client.model_name},
         )
+
+
+VisionMenuExtractor = GeminiMenuExtractor
+
+__all__ = [
+    "GeminiMenuExtractor",
+    "VisionMenuExtractor",
+    "tokenize_food_item",
+]

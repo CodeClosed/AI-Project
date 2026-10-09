@@ -1,5 +1,5 @@
 """
-AI-Powered Nutrition & Health Matrix Profiler using Google Gemini.
+AI-Powered Nutrition & Health Matrix Profiler for NutriMenu AI.
 Synthesizes user biometrics, medical context, lifestyle, and dietary habits
 into a comprehensive metabolic matrix, clinical guardrails, and scored food group affinities.
 """
@@ -9,8 +9,8 @@ import json
 import logging
 from pathlib import Path
 
-from .config import get_gemini_api_key, get_gemini_model_name
-from .gemini_client import GeminiClient, GeminiAPIError
+from .config import get_openrouter_api_key, get_openrouter_model_name
+from .ai_client import AIClient, AIClientError
 from .user_models import (
     UserProfile,
     MacroSplit,
@@ -24,19 +24,21 @@ logger = logging.getLogger(__name__)
 
 
 class AINutritionProfiler:
-    """Intelligent clinical & nutritional matrix generator powered by Gemini AI."""
+    """Intelligent clinical & nutritional matrix generator powered by AI."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None,
+        ai_client: Optional[AIClient] = None,
+        gemini_client: Optional[AIClient] = None,
     ):
-        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.ai_client = ai_client or gemini_client or AIClient(api_key=api_key, model_name=model_name)
+        self.gemini_client = self.ai_client
 
     def is_available(self) -> bool:
-        """Returns True if a valid Gemini API key is configured."""
-        return self.gemini_client.is_available()
+        """Returns True if a valid AI API key is configured."""
+        return self.ai_client.is_available()
 
     def generate_matrix(self, user_input: Union[UserProfile, str, Dict[str, Any]]) -> NutritionalMatrixProfile:
         """
@@ -56,13 +58,13 @@ class AINutritionProfiler:
             try:
                 return self._generate_ai_matrix(profile)
             except Exception as e:
-                logger.warning("[AINutritionProfiler] Gemini AI call failed (%s), falling back to deterministic baseline calculator.", e)
+                logger.warning("[AINutritionProfiler] AI call failed (%s), falling back to deterministic baseline calculator.", e)
                 return self._compute_deterministic_baseline(profile)
         else:
             return self._compute_deterministic_baseline(profile)
 
     def _generate_ai_matrix(self, profile: UserProfile) -> NutritionalMatrixProfile:
-        """Calls Gemini Flash with structured JSON schema to generate deep nutritional matrix."""
+        """Calls AI model with structured JSON schema to generate deep nutritional matrix."""
         prompt = f"""
 You are a world-class clinical dietitian, sports nutritionist, and metabolic health specialist.
 Analyze this user's profile and generate a rigorous, evidence-based personalized Nutritional & Health Matrix.
@@ -151,10 +153,10 @@ Return ONLY valid JSON matching this exact structure:
   "food_groups_to_limit": ["Refined Carbohydrates", "Deep-Fried Foods", "High-Sodium Sauces"]
 }}
 """
-        response_json = self.gemini_client.generate_json(prompt, temperature=0.2)
-        return self._parse_matrix_json(response_json, model_name=self.gemini_client.model_name)
+        response_json = self.ai_client.generate_json(prompt, temperature=0.2)
+        return self._parse_matrix_json(response_json, model_name=self.ai_client.model_name)
 
-    def _parse_matrix_json(self, data: Dict[str, Any], model_name: str = "Gemini-Flash") -> NutritionalMatrixProfile:
+    def _parse_matrix_json(self, data: Dict[str, Any], model_name: str = "Vision-AI") -> NutritionalMatrixProfile:
         """Converts raw JSON dictionary into strongly-typed NutritionalMatrixProfile."""
         meta = data.get("metabolic_matrix", {})
         macro = meta.get("macro_split", {})

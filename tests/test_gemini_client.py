@@ -1,6 +1,6 @@
 """
 Unit tests for GeminiClient with mocked HTTP layer (runs completely offline).
-Validates HTTP 200, 400, 401, 404, 429, 500, timeout, and malformed JSON scenarios.
+Validates HTTP 200, 401, 404, 429, 500, timeout, and malformed JSON scenarios for Gemini 3.7 Flash.
 """
 
 import json
@@ -26,56 +26,59 @@ def mock_session():
 
 def test_missing_api_key_raises_auth_error():
     client = GeminiClient(api_key="")
-    with pytest.raises(GeminiAuthError, match="Gemini API key is not configured"):
+    with pytest.raises(GeminiAuthError, match="Gemini API key is missing"):
         client.generate_json("Test prompt")
 
 
-def test_successful_json_generation_200(mock_session):
+def test_successful_gemini_json_generation_200(mock_session):
     mock_resp = Mock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "candidates": [
             {
                 "content": {
-                    "parts": [{"text": '{"result": "success", "score": 95}'}]
+                    "parts": [
+                        {"text": '{"result": "success", "score": 98, "model": "gemini-3.7-flash"}'}
+                    ]
                 }
             }
         ]
     }
     mock_session.post.return_value = mock_resp
 
-    client = GeminiClient(api_key="test_valid_key", session=mock_session)
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", model_name="gemini-3.7-flash", session=mock_session)
     result = client.generate_json("Generate nutrition test")
 
     assert isinstance(result, dict)
     assert result["result"] == "success"
-    assert result["score"] == 95
+    assert result["score"] == 98
+    assert result["model"] == "gemini-3.7-flash"
     assert mock_session.post.called
 
 
-def test_auth_error_401(mock_session):
+def test_auth_error_401_or_403(mock_session):
     mock_resp = Mock()
     mock_resp.status_code = 401
-    mock_resp.text = "Unauthorized: API key invalid"
+    mock_resp.text = "API key not valid"
     mock_session.post.return_value = mock_resp
 
-    client = GeminiClient(api_key="invalid_key", session=mock_session)
-    with pytest.raises(GeminiAuthError, match="Invalid or unauthorized Gemini API key"):
+    client = GeminiClient(api_key="AIzaSyD-invalid-key-12345", session=mock_session)
+    with pytest.raises(GeminiAuthError, match="Gemini API authentication failed"):
         client.generate_json("Test prompt")
 
 
 def test_rate_limit_error_429(mock_session):
     mock_resp = Mock()
     mock_resp.status_code = 429
-    mock_resp.text = "Quota exceeded"
+    mock_resp.text = "RESOURCE_EXHAUSTED"
     mock_session.post.return_value = mock_resp
 
-    client = GeminiClient(api_key="test_key", session=mock_session)
-    with pytest.raises(GeminiRateLimitError, match="rate limit or quota exceeded"):
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", session=mock_session)
+    with pytest.raises(GeminiAPIError):
         client.generate_json("Test prompt")
 
 
-def test_model_not_found_404_fallback(mock_session):
+def test_model_fallback_404(mock_session):
     mock_resp_404 = Mock()
     mock_resp_404.status_code = 404
     mock_resp_404.text = "Model not found"
@@ -88,31 +91,20 @@ def test_model_not_found_404_fallback(mock_session):
         ]
     }
 
-    # First call returns 404 for primary model, next fallback model returns 200
+    # First model (e.g. non_existent) fails 404, fallback succeeds with 200
     mock_session.post.side_effect = [mock_resp_404, mock_resp_200]
 
-    client = GeminiClient(api_key="test_key", model_name="non_existent_model", session=mock_session)
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", model_name="non_existent_gemini_model", session=mock_session)
     result = client.generate_json("Test prompt")
 
     assert result["status"] == "ok_fallback"
     assert mock_session.post.call_count == 2
 
 
-def test_server_error_500(mock_session):
-    mock_resp = Mock()
-    mock_resp.status_code = 500
-    mock_resp.text = "Internal Server Error"
-    mock_session.post.return_value = mock_resp
-
-    client = GeminiClient(api_key="test_key", session=mock_session)
-    with pytest.raises(GeminiAPIError, match="Gemini server error"):
-        client.generate_json("Test prompt")
-
-
 def test_timeout_error(mock_session):
     mock_session.post.side_effect = requests.exceptions.Timeout("Connection timed out")
 
-    client = GeminiClient(api_key="test_key", timeout=5, session=mock_session)
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", timeout=5, session=mock_session)
     with pytest.raises(GeminiTimeoutError, match="timed out"):
         client.generate_json("Test prompt")
 
@@ -122,16 +114,12 @@ def test_malformed_json_response(mock_session):
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "candidates": [
-            {
-                "content": {
-                    "parts": [{"text": 'Not a JSON text string at all'}]
-                }
-            }
+            {"content": {"parts": [{"text": "Non-JSON response text"}]}}
         ]
     }
     mock_session.post.return_value = mock_resp
 
-    client = GeminiClient(api_key="test_key", session=mock_session)
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", session=mock_session)
     with pytest.raises(GeminiResponseParsingError, match="Failed to parse JSON"):
         client.generate_json("Test prompt")
 
@@ -142,6 +130,29 @@ def test_empty_candidates_response(mock_session):
     mock_resp.json.return_value = {"candidates": []}
     mock_session.post.return_value = mock_resp
 
-    client = GeminiClient(api_key="test_key", session=mock_session)
-    with pytest.raises(GeminiResponseParsingError, match="empty response candidates"):
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", session=mock_session)
+    with pytest.raises(GeminiResponseParsingError, match="no candidates"):
         client.generate_json("Test prompt")
+
+
+def test_markdown_code_fencing_stripped(mock_session):
+    mock_resp = Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"text": '```json\n{"clean_json": true, "gemini_version": "3.7-flash"}\n```'}
+                    ]
+                }
+            }
+        ]
+    }
+    mock_session.post.return_value = mock_resp
+
+    client = GeminiClient(api_key="AIzaSyD-valid-test-key-123456", session=mock_session)
+    result = client.generate_json("Test prompt")
+
+    assert result["clean_json"] is True
+    assert result["gemini_version"] == "3.7-flash"

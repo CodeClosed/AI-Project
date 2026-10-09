@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 
 from .config import DEFAULT_GOOD_THRESHOLD, DEFAULT_BAD_THRESHOLD
-from .gemini_client import GeminiClient, GeminiAPIError
+from .ai_client import AIClient, AIClientError
 from .models import MenuItem, RecognizedMenu
 from .user_models import NutritionalMatrixProfile, DishEvaluationResult
 from .matrix_generator import UserNutritionalMatrix
@@ -190,12 +190,14 @@ class TieredFoodRecommender:
         user_matrix: Union[UserNutritionalMatrix, NutritionalMatrixProfile, Dict[str, Any]],
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None,
+        ai_client: Optional[AIClient] = None,
+        gemini_client: Optional[AIClient] = None,
         good_threshold: int = DEFAULT_GOOD_THRESHOLD,
         bad_threshold: int = DEFAULT_BAD_THRESHOLD,
     ):
         self.user_matrix = user_matrix
-        self.gemini_client = gemini_client or GeminiClient(api_key=api_key, model_name=model_name)
+        self.ai_client = ai_client or gemini_client or AIClient(api_key=api_key, model_name=model_name)
+        self.gemini_client = self.ai_client
         
         # Enforce threshold validity (0 <= bad < good <= 100)
         self.bad_threshold = max(0, min(95, int(bad_threshold)))
@@ -204,7 +206,7 @@ class TieredFoodRecommender:
         self._normalize_user_context()
 
     def is_available(self) -> bool:
-        return self.gemini_client.is_available()
+        return self.ai_client.is_available()
 
     def _normalize_user_context(self):
         """Extracts standard user context fields whether input is UserNutritionalMatrix or NutritionalMatrixProfile."""
@@ -305,10 +307,10 @@ class TieredFoodRecommender:
                     "tier": FoodTier.BAD,
                     "fit_score": 0,
                     "summary_reason": reason,
-                    "matched_food_groups": [f"{meat} Poultry / Meat"],
+                    "matched_food_groups": [f"{meat} / Non-Veg"],
                     "green_flags": [],
-                    "red_flags": [f"Contains non-vegetarian animal ingredient: {meat.lower()}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Non-vegetarian ({meat.lower()})"],
+                    "red_flags": [f"Animal meat protein ({meat.lower()})"],
+                    "allergen_warnings": [f"Non-Vegetarian ({meat.title()})"],
                     "customization_tips": tip,
                 }
 
@@ -324,8 +326,8 @@ class TieredFoodRecommender:
                     "summary_reason": f"Contains animal-derived dairy or egg ingredient ({item_name.lower()}), conflicting with vegan/dairy-free protocol.",
                     "matched_food_groups": ["Dairy / Egg Byproduct"],
                     "green_flags": [],
-                    "red_flags": [f"Contains animal byproduct: {item_name.lower()}"],
-                    "allergen_warnings": [f"Strict Dietary Violation: Dairy/Egg ({item_name.lower()})"],
+                    "red_flags": [f"Animal dairy/egg byproduct ({item_name.lower()})"],
+                    "allergen_warnings": [f"Contains Dairy/Egg ({item_name.title()})"],
                     "customization_tips": f"Ask the kitchen for dairy-free coconut milk/cashew cream preparation or tofu substitution.",
                 }
 
@@ -358,8 +360,8 @@ class TieredFoodRecommender:
                         "summary_reason": f"Critical Allergen Alert: Recipe incorporates declared allergen '{allergy}' ({target}).",
                         "matched_food_groups": [f"Allergen: {allergy.title()}"],
                         "green_flags": [],
-                        "red_flags": [f"Zero-tolerance allergen detected: {allergy}"],
-                        "allergen_warnings": [f"Contains Declared Allergen: {allergy}"],
+                        "red_flags": [f"Contains declared {allergy.lower()}"],
+                        "allergen_warnings": [f"Contains {allergy.title()}"],
                         "customization_tips": f"Requires complete kitchen cross-contact isolation or choose a guaranteed {allergy}-free dish.",
                     }
 
@@ -430,14 +432,53 @@ class TieredFoodRecommender:
 
         recommendations: List[TieredFoodRecommendation] = []
 
-        if self.is_available():
-            try:
-                recommendations = self._recommend_batch_ai(dishes)
-            except Exception as e:
-                logger.warning("[TieredFoodRecommender] Batch AI failed (%s), using deterministic engine.", e)
-                recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
-        else:
-            recommendations = [self._recommend_dish_deterministic(d) for d in dishes]
+        # 1. Pre-check: Fast-track dishes with hard exclusions
+        pending_ai_dishes: List[Dict[str, Any]] = []
+        dish_map: Dict[str, Dict[str, Any]] = {}
+
+        for d in dishes:
+            d_name = d.get("name", "Unknown Item").strip()
+            dish_map[d_name.lower()] = d
+            full_text = f"{d_name} {d.get('description', '')} {' '.join(d.get('tags', []))}"
+            violation = self.check_hard_exclusions(full_text)
+            if violation:
+                recommendations.append(
+                    TieredFoodRecommendation(
+                        dish_name=d_name,
+                        tier=violation["tier"],
+                        fit_score=violation["fit_score"],
+                        summary_reason=violation["summary_reason"],
+                        matched_food_groups=violation["matched_food_groups"],
+                        green_flags=violation["green_flags"],
+                        red_flags=violation["red_flags"],
+                        allergen_warnings=violation["allergen_warnings"],
+                        customization_tips=violation["customization_tips"],
+                        price=d.get("price", ""),
+                    )
+                )
+            else:
+                pending_ai_dishes.append(d)
+
+        # 2. Evaluate remaining dishes via AI or deterministic fallback
+        if pending_ai_dishes:
+            if self.is_available():
+                try:
+                    ai_recs = self._recommend_batch_ai(pending_ai_dishes)
+                    recommendations.extend(ai_recs)
+                except Exception as e:
+                    logger.warning("[TieredFoodRecommender] Batch AI failed (%s), using deterministic engine.", e)
+                    recommendations.extend([self._recommend_dish_deterministic(d) for d in pending_ai_dishes])
+            else:
+                recommendations.extend([self._recommend_dish_deterministic(d) for d in pending_ai_dishes])
+
+        # 3. GUARANTEE: Ensure every single dish from the input is included (no dishes dropped)
+        evaluated_names = {r.dish_name.strip().lower() for r in recommendations}
+        for d in dishes:
+            d_name = d.get("name", "Unknown Item").strip()
+            if d_name.lower() not in evaluated_names:
+                rec = self._recommend_dish_deterministic(d)
+                recommendations.append(rec)
+                evaluated_names.add(d_name.lower())
 
         # Post-check: Enforce hard safety constraints across ALL recommendations
         validated_recs: List[TieredFoodRecommendation] = []
@@ -499,7 +540,36 @@ class TieredFoodRecommender:
             }
 
     def _recommend_batch_ai(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
-        """Classifies dishes into 3 tiers using Gemini Flash with deep item-specific clinical reasoning."""
+        """Classifies dishes into 3 tiers using Vision/Language AI with deep item-specific clinical reasoning."""
+        if not dishes:
+            return []
+
+        # If more than 15 dishes, process in chunks to prevent model output token truncation
+        chunk_size = 15
+        if len(dishes) > chunk_size:
+            all_results: List[TieredFoodRecommendation] = []
+            # Process up to 2 chunks (30 items) with AI to conserve token latency & free rate limits
+            max_ai_chunks = 2
+            for i in range(0, len(dishes), chunk_size):
+                chunk = dishes[i : i + chunk_size]
+                chunk_idx = i // chunk_size
+                if chunk_idx < max_ai_chunks:
+                    try:
+                        chunk_results = self._recommend_batch_ai_single(chunk)
+                        all_results.extend(chunk_results)
+                    except Exception as e:
+                        logger.warning("[TieredFoodRecommender] AI evaluation failed for chunk %d (%s), using deterministic.", chunk_idx, e)
+                        for d in chunk:
+                            all_results.append(self._recommend_dish_deterministic(d))
+                else:
+                    for d in chunk:
+                        all_results.append(self._recommend_dish_deterministic(d))
+            return all_results
+
+        return self._recommend_batch_ai_single(dishes)
+
+    def _recommend_batch_ai_single(self, dishes: List[Dict[str, Any]]) -> List[TieredFoodRecommendation]:
+        """Evaluates a single chunk of dishes (up to 15 items) via LLM prompt."""
         prompt = f"""
 You are an elite Clinical Nutrition Scientist and Master Culinary Dietitian (The Middle Model).
 Evaluate each restaurant menu item against the user's specific clinical health profile and classify it into EXACTLY ONE of 3 TIERS:
@@ -536,6 +606,8 @@ CRITICAL INSTRUCTIONS FOR HIGH-CRAFT, BESPOKE ANALYSIS:
      - For Rotis: suggest "Request unbuttered 100% whole wheat tandoori roti rather than maida-based naan".
      - For Burgers: suggest "Request a spiced chickpea patty or grilled paneer steak on a whole wheat bun".
 5. HARD SAFETY VIOLATIONS: If a dish violates declared allergens or vegetarian/vegan restrictions, force Tier = "BAD", fit_score = 0, and describe the exact violation in 'allergen_warnings'.
+   - For dishes with violations or BAD tier: set 'green_flags': []. NEVER output 'None', 'N/A', or placeholder values in 'green_flags' or 'red_flags'.
+   - Do NOT duplicate allergen or dietary violation warnings in 'red_flags' if already specified in 'allergen_warnings'.
 
 Return ONLY valid JSON matching this schema:
 [
@@ -556,16 +628,47 @@ Return ONLY valid JSON matching this schema:
   }}
 ]
 """
-        response_json = self.gemini_client.generate_json(prompt, temperature=0.1)
+        response_json = self.ai_client.generate_json(prompt, temperature=0.1)
 
         if isinstance(response_json, dict) and "recommendations" in response_json:
             response_json = response_json["recommendations"]
         elif isinstance(response_json, dict) and "dishes" in response_json:
             response_json = response_json["dishes"]
         elif not isinstance(response_json, list):
-            raise GeminiAPIError("Expected JSON array of recommendations.")
+            raise AIClientError("Expected JSON array of recommendations.")
 
         dish_price_map = {d.get("name", "").lower(): d.get("price", "") for d in dishes}
+
+        def _clean_flag_list(flags: list, filter_against: list = None) -> List[str]:
+            if not flags:
+                return []
+            placeholders = {"none", "n/a", "na", "nil", "null", "no green flags", "no red flags", "none.", "not applicable"}
+            cleaned = []
+            seen = set()
+            for f in flags:
+                if not f or not isinstance(f, str):
+                    continue
+                s = re.sub(r"^[⛔⚠️✨✓🌿•\-*\s]+", "", f).strip()
+                if not s or s.lower() in placeholders:
+                    continue
+                s_lower = s.lower()
+                if s_lower in seen:
+                    continue
+                if filter_against:
+                    is_redundant = False
+                    for w in filter_against:
+                        w_low = w.lower()
+                        if s_lower in w_low or w_low in s_lower:
+                            is_redundant = True
+                            break
+                        if ("meat" in s_lower or "non-veg" in s_lower) and ("meat" in w_low or "non-veg" in w_low or "chicken" in w_low or "mutton" in w_low):
+                            is_redundant = True
+                            break
+                    if is_redundant:
+                        continue
+                seen.add(s_lower)
+                cleaned.append(s[0].upper() + s[1:] if len(s) > 1 else s.upper())
+            return cleaned
 
         results: List[TieredFoodRecommendation] = []
         for d in response_json:
@@ -581,8 +684,11 @@ Return ONLY valid JSON matching this schema:
                 score = 0
                 summary = d.get("summary_reason") if d.get("summary_reason") and len(d.get("summary_reason")) > 25 and "Classified based" not in d.get("summary_reason") else violation["summary_reason"]
                 tips = d.get("customization_tips") if d.get("customization_tips") and len(d.get("customization_tips")) > 20 else violation["customization_tips"]
-                warnings = list(dict.fromkeys(d.get("allergen_warnings", []) + violation["allergen_warnings"]))
-                reds = list(dict.fromkeys(d.get("red_flags", []) + violation["red_flags"]))
+                raw_warnings = violation.get("allergen_warnings", []) + d.get("allergen_warnings", [])
+                warnings = _clean_flag_list(raw_warnings)
+                raw_reds = violation.get("red_flags", []) + d.get("red_flags", [])
+                reds = _clean_flag_list(raw_reds, filter_against=warnings)
+                greens = []  # BAD tier dishes must never have positive green flags
             else:
                 if score >= self.good_threshold:
                     tier = FoodTier.GOOD
@@ -592,8 +698,13 @@ Return ONLY valid JSON matching this schema:
                     tier = FoodTier.BAD
                 summary = d.get("summary_reason", "Classified based on clinical nutritional matrix.")
                 tips = d.get("customization_tips")
-                warnings = d.get("allergen_warnings", [])
-                reds = d.get("red_flags", [])
+                warnings = _clean_flag_list(d.get("allergen_warnings", []))
+                greens = [] if tier == FoodTier.BAD else _clean_flag_list(d.get("green_flags", []))
+                red_candidates = list(d.get("red_flags", []))
+                if self.glycemic_sensitivity > 0.5 and any(w in full_dish_text.lower() for w in ["cake", "sweet", "meetha", "ice cream", "sugar", "syrup", "lava"]):
+                    if not any("sugar" in r.lower() or "carbohydrate" in r.lower() for r in red_candidates):
+                        red_candidates.append("Elevated refined sugar content increases glycemic risk")
+                reds = _clean_flag_list(red_candidates, filter_against=warnings)
 
             results.append(
                 TieredFoodRecommendation(
@@ -602,7 +713,7 @@ Return ONLY valid JSON matching this schema:
                     fit_score=score,
                     summary_reason=summary,
                     matched_food_groups=d.get("matched_food_groups", []),
-                    green_flags=d.get("green_flags", []),
+                    green_flags=greens,
                     red_flags=reds,
                     allergen_warnings=warnings,
                     customization_tips=tips,
@@ -736,31 +847,66 @@ Return ONLY valid JSON matching this schema:
             customization = "Request oven-baked potato wedges with skin-on or substitute with steamed edamame."
         else:
             # Fallback general heuristics
-            if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber"]):
-                score += 15
-                greens.append("High in dietary fiber, polyphenols, and micronutrients")
+            if any(w in full_text for w in ["salad", "spinach", "palak", "broccoli", "greens", "cucumber", "avocado", "sprouts"]):
+                score += 18
+                greens.append("Abundant in dietary fiber, polyphenols, and essential micronutrients")
                 matched_groups.append("Leafy & Cruciferous Vegetables")
-            if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "grilled chicken", "fish tikka", "salmon"]):
-                score += 12
-                greens.append("High protein density supporting lean mass preservation")
+            if any(w in full_text for w in ["dal", "lentil", "chana", "tofu", "beans", "grilled chicken", "fish tikka", "salmon", "egg", "egg white"]):
+                score += 15
+                greens.append(f"High protein density aiding {self.target_protein_g:.0f}g daily target and satiety")
                 matched_groups.append("Lean / Plant Protein")
-            if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa"]):
-                score -= 25
+            if any(w in full_text for w in ["fried", "crispy", "fry", "pakora", "samosa", "poori", "puri", "bhatura"]):
+                score -= 28
                 reds.append("Deep-fried; high oxidized lipid load and elevated caloric density")
                 matched_groups.append("Deep Fried Foods")
+            if any(w in full_text for w in ["rice", "noodles", "pasta", "biryani", "pulao", "naan"]):
+                if self.glycemic_sensitivity > 0.6:
+                    score -= 15
+                    reds.append("Starch-dense carbohydrate base elevates glycemic surge risk")
+                else:
+                    greens.append("Provides sustained carbohydrate energy")
+                matched_groups.append("Carbohydrate Energy Source")
+
+            # Apply clinical risk modifiers
+            if self.sodium_ceiling < 2000 and any(w in full_text for w in ["soup", "gravy", "masala", "salted", "pickle", "sauce"]):
+                score -= 10
+                reds.append(f"Sodium content requires monitoring against your <{self.sodium_ceiling}mg daily limit")
 
             score = max(5, min(98, score))
+            
+            # Formulate dynamic bespoke summary tailored to matrix
             if score >= self.good_threshold:
-                summary = f"Strong nutritional alignment for '{name}'. Low glycemic impact with quality micronutrient density."
-                customization = "Pair with a fresh green salad or steamed whole grain side."
+                summary = f"Optimal metabolic fit for '{name}' matching your {self.target_calories:.0f} kcal energy goal and health profile. Low inflammatory load with high micronutrient and fiber support."
+                customization = "Enjoy with fresh greens or a light squeeze of lemon for enhanced bio-availability."
             elif score >= self.bad_threshold:
-                summary = f"Moderate metabolic fit for '{name}'. Acceptable in portion-controlled servings with mindful sodium and fat balance."
-                customization = "Request light cooking oil or sauce on the side."
+                summary = f"Moderate fit for '{name}'. Contains balanced macronutrients but warrants mindful portioning to stay aligned with your daily metabolic targets."
+                customization = "Request light oil/sauce, pair with dietary fiber, or enjoy in measured portions."
             else:
-                summary = f"'{name}' is not recommended due to high refined carbohydrate, saturated fat, or sodium density."
-                customization = "Consider substituting with grilled, tandoori, or unrefined whole food alternatives."
+                summary = f"'{name}' carries high caloric or glycemic density that conflicts with your active clinical guardrails and metabolic objectives."
+                customization = "Consider substituting with baked, steamed, tandoori, or unrefined whole-food alternatives."
 
         tier = FoodTier.GOOD if score >= self.good_threshold else (FoodTier.MEDIUM if score >= self.bad_threshold else FoodTier.BAD)
+
+        # Baseline macro heuristics based on dish profile
+        cal = 320
+        prot = 10
+        carbs = 42
+        fat = 12
+
+        if is_biryani:
+            cal, prot, carbs, fat = 520, 14, 75, 18
+        elif any(w in full_text for w in ["roti", "naan", "paratha", "bread", "phulka", "kulcha"]):
+            cal, prot, carbs, fat = 150, 4, 28, 2
+        elif any(w in full_text for w in ["salad", "soup", "sprouts", "cucumber"]):
+            cal, prot, carbs, fat = 110, 4, 15, 3
+        elif any(w in full_text for w in ["paneer", "tofu", "dal", "chana", "curry", "makhani"]):
+            cal, prot, carbs, fat = 350, 15, 22, 22
+        elif any(w in full_text for w in ["fries", "pakora", "samosa", "poori", "puri", "bhatura", "manchurian"]):
+            cal, prot, carbs, fat = 440, 7, 50, 24
+        elif any(w in full_text for w in ["cake", "sweet", "meetha", "ice cream", "gulab jamun", "brownie"]):
+            cal, prot, carbs, fat = 390, 4, 60, 16
+        elif any(w in full_text for w in ["diet coke", "zero sugar", "water"]):
+            cal, prot, carbs, fat = 0, 0, 0, 0
 
         return TieredFoodRecommendation(
             dish_name=name,
@@ -772,5 +918,9 @@ Return ONLY valid JSON matching this schema:
             red_flags=reds,
             allergen_warnings=allergen_alerts,
             customization_tips=customization,
+            estimated_calories=cal,
+            estimated_protein_g=prot,
+            estimated_carbs_g=carbs,
+            estimated_fat_g=fat,
             price=price,
         )

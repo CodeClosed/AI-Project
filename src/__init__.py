@@ -6,8 +6,9 @@ from .models import BoundingBox, TextBlock, MenuItem, MenuSection, RecognizedMen
 from .preprocessing import Preprocessor
 from .ocr_engine import LocalOCREngine
 from .layout_analyzer import LayoutAnalyzer
-from .menu_parser import MenuParser
-from .gemini_extractor import GeminiMenuExtractor
+from .openrouter_extractor import OpenRouterMenuExtractor
+from .ai_client import AIClient
+from .gemini_extractor import GeminiMenuExtractor, VisionMenuExtractor
 from .visualizer import MenuVisualizer
 from .pipeline import MenuRecognitionPipeline
 

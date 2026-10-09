@@ -31,8 +31,8 @@ def main():
 
     # 1. Initialize Profiler
     profiler = AINutritionProfiler()
-    engine_status = "Google Gemini AI (Online)" if profiler.is_available() else "Deterministic Baseline (Offline)"
-    print(f"[*] Engine Mode: {engine_status}\n")
+    engine_status = "Vision/Language AI (Online)" if profiler.is_available() else "Deterministic Baseline (Offline)"
+    print(f"[*] Profiler Engine Status: {engine_status}\n")
 
     # 2. Define Sample User Profile
     user = UserProfile(
