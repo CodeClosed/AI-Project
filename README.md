@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB.svg?logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Styling-Tailwind%20CSS-38B2AC.svg?logo=tailwind-css)](https://tailwindcss.com/)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%203.7%20Flash-orange.svg)](https://aistudio.google.com/)
-[![Tests](https://img.shields.io/badge/Tests-70%20Passing-success.svg)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-96%20Passing-success.svg)](https://docs.pytest.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **NutriMenu AI** is an intelligent full-stack clinical recommendation platform that bridges physical restaurant menus with personalized metabolic and medical health matrices. Powered by **Google Gemini 3.7 Flash**, it digitizes complex restaurant and timetable menus, evaluates dishes against clinical guardrails, classifies them into **🟢 Tier 1: GOOD**, **🟡 Tier 2: MEDIUM**, and **🔴 Tier 3: BAD** tiers, and tracks active meal plates with multi-meal cumulative macro budgets.
@@ -213,26 +213,54 @@ Interactive documentation is available at [http://127.0.0.1:8000/docs](http://12
 
 ---
 
+## 🚀 Deployment & GitHub Pages
+
+### 🌐 Deploying the Frontend to GitHub Pages
+
+The repository includes an automated GitHub Actions deployment workflow at `.github/workflows/deploy.yml`.
+
+1. **Enable GitHub Pages**:
+   - Go to your repository on GitHub: `Settings` $\to$ `Pages`.
+   - Under **Build and deployment** $\to$ **Source**, choose **GitHub Actions**.
+2. **Automated Continuous Deployment**:
+   - Every push to `dev-vihaan` or `main` automatically triggers the GitHub Actions workflow.
+   - Vite builds the production bundle with relative base paths (`base: './'`) and generates a `404.html` SPA fallback.
+   - The React application is deployed to `https://codeclosed.github.io/AI-Project/`.
+3. **Connecting Backend to GitHub Pages**:
+   - In the deployed application, open **Settings** (top-right gear icon) $\to$ **Preferences** $\to$ **Backend API Endpoint**.
+   - Input your backend API server URL (e.g. `https://your-backend-api.onrender.com` or local tunnel) and click **Save**.
+   - You can also bake the endpoint into the build via the `VITE_API_BASE_URL` environment variable.
+
+---
+
 ## 📁 Repository Structure
 
 ```
 AI-Project/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml            # Automated GitHub Pages CI/CD workflow
+├── alembic/                      # Alembic schema versioning & migrations
 ├── backend/
-│   └── api.py                    # FastAPI REST server
+│   ├── api.py                    # Hardened FastAPI REST server (CORS, CSRF, Audit)
+│   ├── database.py               # SQLAlchemy SQLite engine & session management
+│   ├── db_models.py              # Persistent relational models (Users, Menus, Meals)
+│   ├── jobs.py                   # Thread-safe async OCR & Recommendation job queue
+│   ├── schemas.py                # Pydantic v2 validation contracts
+│   └── security.py               # PBKDF2 hashing, JWT, TOTP 2FA, rate limiting
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── AccountDrawerModal.jsx        # Health profile & live matrix studio
-│   │   │   ├── MenuUploadSection.jsx         # Gemini 3.7 Flash OCR menu scanner
-│   │   │   ├── RecommendationTableSection.jsx # 3-tier recommendations dashboard
-│   │   │   └── MealPlateDrawer.jsx           # Active meal plate & multi-meal tracker
-│   │   ├── App.jsx               # Main React application
-│   │   ├── api.js                # API client
-│   │   └── index.css             # Tailwind CSS & glassmorphic styles
+│   │   ├── components/           # UI Modals & Nav (Layout, Settings, MFA, ForgotPassword)
+│   │   ├── context/              # Context providers (AuthContext, NutritionContext, ThemeContext)
+│   │   ├── pages/                # Multi-page views (Dashboard, Menu, Plate, Calendar, Profile, Login)
+│   │   ├── utils/                # Data export utilities (CSV / JSON)
+│   │   ├── App.jsx               # Main React router (HashRouter for GitHub Pages)
+│   │   ├── api.js                # API client with JWT injection & custom endpoint switching
+│   │   └── index.css             # Tailwind CSS & design tokens
 │   ├── package.json
-│   └── vite.config.js
+│   └── vite.config.js            # Vite build configuration with copy-404 plugin
 ├── src/
-│   ├── gemini_client.py          # Google Gemini 3.7 Flash API Client
+│   ├── gemini_client.py          # Google Gemini API Client
 │   ├── gemini_extractor.py       # Multimodal table grid OCR menu extractor
 │   ├── plate_optimizer.py        # Multi-dish plate synergy & companion suggester
 │   ├── matrix_generator.py       # Mifflin-St Jeor metabolic & clinical matrix
@@ -241,7 +269,10 @@ AI-Project/
 │   ├── pipeline.py               # End-to-end menu recognition pipeline
 │   ├── models.py                 # Data classes & schemas
 │   └── config.py                 # Centralized configuration & thresholds
-├── tests/                        # 100% offline pytest test suites (70 tests)
+├── tests/                        # 100% offline pytest test suites (96 tests passing)
+│   ├── test_mfa_and_password_reset.py # MFA & password reset test suite
+│   ├── test_security_and_auth.py      # Auth, brute-force & CSRF security test suite
+│   └── ...
 ├── app.py                        # Streamlit application
 ├── run_fullstack.py              # Full-stack launcher (FastAPI + React)
 ├── run_ui.py                     # Streamlit launcher
@@ -253,3 +284,4 @@ AI-Project/
 ## ℹ️ Medical & Nutritional Guidance Disclaimer
 
 **Notice**: Recommendations provided by NutriMenu AI are personalized computational estimates based on user-entered parameters, Mifflin-St Jeor metabolic equations, and published clinical nutritional literature. This application is not a medical device and does not substitute for personalized medical diagnoses, treatments, or dietary prescriptions from a licensed physician or registered dietitian.
+
