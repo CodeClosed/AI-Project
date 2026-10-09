@@ -36,3 +36,13 @@ htmlcov/
 examples/output/
 Screenshot*.png
 .env
+
+# SQLite Databases & Local Storage
+*.db
+*.sqlite3
+
+# Uploads & local runtime artifacts
+uploads/
+*.log
+
+

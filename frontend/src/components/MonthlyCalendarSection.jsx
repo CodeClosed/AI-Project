@@ -21,6 +21,7 @@ import {
   X,
   ShieldAlert,
 } from 'lucide-react';
+import { exportMealsToCsv, openClinicalDoctorReport } from '../utils/exportUtils';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -39,7 +40,6 @@ export default function MonthlyCalendarSection({
   dishes = [],
   activePlate = [],
   onAddToPlate,
-  onOpenPlateDrawer,
 }) {
   const today = new Date();
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -137,7 +137,8 @@ export default function MonthlyCalendarSection({
   const dailyStatsMap = useMemo(() => {
     const map = {};
     loggedMeals.forEach((meal) => {
-      const d = meal.date;
+      const d = meal.date || (meal.timestamp && String(meal.timestamp).split('T')[0]);
+      if (!d) return;
       if (!map[d]) {
         map[d] = {
           calories: 0,
@@ -149,12 +150,19 @@ export default function MonthlyCalendarSection({
           meals: [],
         };
       }
-      map[d].calories += meal.nutrients?.calories || 0;
-      map[d].protein += meal.nutrients?.protein || 0;
-      map[d].carbs += meal.nutrients?.carbs || 0;
-      map[d].fat += meal.nutrients?.fat || 0;
-      map[d].sodium += meal.nutrients?.sodium || 0;
-      map[d].fiber += meal.nutrients?.fiber || 0;
+      const cals = Number(meal.total_calories ?? meal.nutrients?.calories ?? 0);
+      const prot = Number(meal.total_protein ?? meal.nutrients?.protein ?? 0);
+      const carbs = Number(meal.total_carbs ?? meal.nutrients?.carbs ?? 0);
+      const fat = Number(meal.total_fats ?? meal.nutrients?.fat ?? meal.nutrients?.fats ?? 0);
+      const sod = Number(meal.total_sodium ?? meal.nutrients?.sodium ?? 0);
+      const fib = Number(meal.nutrients?.fiber ?? 0);
+
+      map[d].calories += cals;
+      map[d].protein += prot;
+      map[d].carbs += carbs;
+      map[d].fat += fat;
+      map[d].sodium += sod;
+      map[d].fiber += fib;
       map[d].meals.push(meal);
     });
     return map;
@@ -246,34 +254,71 @@ export default function MonthlyCalendarSection({
     return 'MODERATE';
   };
 
-  // Quick Action: Add Current Active Plate to Selected Day
+  // Quick Action: Add Current Active Plate to Selected Day (Dynamic Nutrients Binding)
   const handleAddActivePlateToSelectedDay = () => {
     if (!activePlate || activePlate.length === 0 || !onSaveMealToLog) return;
     const now = new Date();
-    const plateCals = activePlate.reduce((acc, p) => acc + (p.portion || 1) * 320, 0);
-    const plateProtein = activePlate.reduce((acc, p) => acc + (p.portion || 1) * 14, 0);
-    const plateCarbs = activePlate.reduce((acc, p) => acc + (p.portion || 1) * 40, 0);
-    const plateFat = activePlate.reduce((acc, p) => acc + (p.portion || 1) * 12, 0);
-    const plateSodium = activePlate.reduce((acc, p) => acc + (p.portion || 1) * 380, 0);
+
+    let totalCals = 0;
+    let totalProtein = 0;
+    let totalCarbs = 0;
+    let totalFat = 0;
+    let totalSodium = 0;
+    let totalFiber = 0;
+
+    activePlate.forEach((p) => {
+      const portion = Number(p.portion) || 1.0;
+      // Look up if dish exists in dishes array with estimated or evaluated nutrients
+      const matched = dishes.find(
+        (d) => (typeof d === 'string' ? d : d.name || '').toLowerCase() === (p.name || '').toLowerCase()
+      );
+      const dishNutrients = p.nutrients || (matched && typeof matched === 'object' ? matched.nutrients || matched : {}) || {};
+
+      const cals = Number(dishNutrients.calories || matched?.calories) || 380;
+      const prot = Number(dishNutrients.protein || matched?.protein) || 20;
+      const carbs = Number(dishNutrients.carbs || matched?.carbs) || 45;
+      const fat = Number(dishNutrients.fat || matched?.fat) || 14;
+      const sod = Number(dishNutrients.sodium || matched?.sodium) || 420;
+      const fib = Number(dishNutrients.fiber || matched?.fiber) || 5;
+
+      totalCals += cals * portion;
+      totalProtein += prot * portion;
+      totalCarbs += carbs * portion;
+      totalFat += fat * portion;
+      totalSodium += sod * portion;
+      totalFiber += fib * portion;
+    });
 
     const mealEntry = {
       id: `${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      name: `Plate Entry (${activePlate.length} dishes)`,
+      meal_type: 'Dinner',
       date: selectedDate,
       mealSlot: 'Dinner',
-      timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: now.toISOString(),
+      dishes: activePlate.map((p) => ({
+        name: p.name,
+        portion: p.portion || 1.0,
+        price: p.price || '',
+      })),
       items: activePlate.map((p) => ({
         name: p.name,
         portion: p.portion || 1.0,
         price: p.price || '',
       })),
       nutrients: {
-        calories: Math.round(plateCals),
-        protein: Math.round(plateProtein),
-        carbs: Math.round(plateCarbs),
-        fat: Math.round(plateFat),
-        sodium: Math.round(plateSodium),
-        fiber: 8,
+        calories: Math.round(totalCals),
+        protein: Math.round(totalProtein),
+        carbs: Math.round(totalCarbs),
+        fat: Math.round(totalFat),
+        sodium: Math.round(totalSodium),
+        fiber: Math.round(totalFiber),
       },
+      total_calories: Math.round(totalCals),
+      total_protein: Math.round(totalProtein),
+      total_carbs: Math.round(totalCarbs),
+      total_fats: Math.round(totalFat),
+      total_sodium: Math.round(totalSodium),
     };
 
     onSaveMealToLog(mealEntry);
@@ -284,11 +329,26 @@ export default function MonthlyCalendarSection({
     e.preventDefault();
     if (!newMealDishName.trim()) return;
 
+    const cals = Number(newMealCalories) || 350;
+    const prot = Number(newMealProtein) || 15;
+    const carbs = Number(newMealCarbs) || 40;
+    const fat = Number(newMealFat) || 12;
+    const sod = Number(newMealSodium) || 400;
+
     const mealEntry = {
       id: `${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      name: newMealDishName.trim(),
+      meal_type: newMealSlot,
       date: selectedDate,
       mealSlot: newMealSlot,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
+      dishes: [
+        {
+          name: newMealDishName.trim(),
+          portion: 1.0,
+          price: '',
+        },
+      ],
       items: [
         {
           name: newMealDishName.trim(),
@@ -297,13 +357,18 @@ export default function MonthlyCalendarSection({
         },
       ],
       nutrients: {
-        calories: Number(newMealCalories) || 350,
-        protein: Number(newMealProtein) || 15,
-        carbs: Number(newMealCarbs) || 40,
-        fat: Number(newMealFat) || 12,
-        sodium: Number(newMealSodium) || 400,
+        calories: cals,
+        protein: prot,
+        carbs: carbs,
+        fat: fat,
+        sodium: sod,
         fiber: 5,
       },
+      total_calories: cals,
+      total_protein: prot,
+      total_carbs: carbs,
+      total_fats: fat,
+      total_sodium: sod,
     };
 
     onSaveMealToLog(mealEntry);
@@ -314,38 +379,38 @@ export default function MonthlyCalendarSection({
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* 1. Monthly Plan Health Dashboard Banner */}
-      <section className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6 transition-colors">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
           <div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                <CalendarIcon className="w-4 h-4 text-emerald-600" />
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-bold">
+                <CalendarIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               </div>
-              <h2 className="text-lg font-black text-slate-900 tracking-tight">
+              <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
                 Monthly Nutrition Calendar & Plan Analytics
               </h2>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Tracks continuous daily meal consumption against your personalized metabolic targets and clinical safety limits.
             </p>
           </div>
 
           {/* Month Navigation & Clear Actions */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+            <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
               <button
                 onClick={handlePrevMonth}
-                className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition cursor-pointer"
+                className="p-1.5 rounded-xl hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
                 title="Previous Month"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="px-3 text-xs font-bold text-slate-800 min-w-[120px] text-center select-none">
+              <span className="px-3 text-xs font-bold text-slate-800 dark:text-slate-200 min-w-[120px] text-center select-none">
                 {MONTH_NAMES[currentMonth]} {currentYear}
               </span>
               <button
                 onClick={handleNextMonth}
-                className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition cursor-pointer"
+                className="p-1.5 rounded-xl hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
                 title="Next Month"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -354,10 +419,32 @@ export default function MonthlyCalendarSection({
 
             <button
               onClick={handleJumpToToday}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
             >
               Today
             </button>
+
+            {loggedMeals.length > 0 && (
+              <>
+                <button
+                  onClick={() => exportMealsToCsv(loggedMeals, dailyTargets)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold transition cursor-pointer shadow-2xs"
+                  title="Download your monthly meal and macro log as CSV report"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Export CSV</span>
+                </button>
+
+                <button
+                  onClick={() => openClinicalDoctorReport({ profile: userProfile, userMatrix, loggedMeals })}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold transition cursor-pointer shadow-2xs"
+                  title="Print/PDF Clinical Consultation Dossier for Doctors or Dietitians"
+                >
+                  <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Physician Report</span>
+                </button>
+              </>
+            )}
 
             {loggedMeals.length > 0 && onClearAllLoggedMeals && (
               <button
@@ -366,7 +453,7 @@ export default function MonthlyCalendarSection({
                     onClearAllLoggedMeals();
                   }
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-slate-600 border border-slate-200 text-xs font-bold transition cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/60 hover:text-rose-700 dark:hover:text-rose-400 hover:border-rose-200 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer"
                 title="Clear all recorded meals"
               >
                 <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-rose-600" />
@@ -379,20 +466,20 @@ export default function MonthlyCalendarSection({
         {/* Basic Metrics of the Whole Plan (KPI Cards) */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Caloric Intake vs Target */}
-          <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">
               <span className="flex items-center gap-1.5">
                 <Flame className="w-3.5 h-3.5 text-amber-500" /> Avg Daily Calories
               </span>
-              <span className="text-[10px] text-slate-400">Target: {dailyTargets.calories}</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">Target: {dailyTargets.calories}</span>
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-xl font-black text-slate-900 tabular-nums">
-                {monthlyMetrics.avgDailyCals} <span className="text-xs font-normal text-slate-500">kcal/day</span>
+              <span className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
+                {monthlyMetrics.avgDailyCals} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">kcal/day</span>
               </span>
             </div>
             {/* Progress bar */}
-            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+            <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-500 ${
                   monthlyMetrics.avgDailyCals > dailyTargets.calories * 1.15
@@ -404,9 +491,9 @@ export default function MonthlyCalendarSection({
                 }}
               />
             </div>
-            <div className="text-[10px] text-slate-500 font-medium flex justify-between">
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium flex justify-between">
               <span>{monthlyMetrics.loggedDaysCount} days recorded</span>
-              <span className={monthlyMetrics.avgDailyCals <= dailyTargets.calories ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>
+              <span className={monthlyMetrics.avgDailyCals <= dailyTargets.calories ? 'text-emerald-700 dark:text-emerald-400 font-bold' : 'text-amber-700 dark:text-amber-400 font-bold'}>
                 {monthlyMetrics.avgDailyCals <= dailyTargets.calories ? 'Deficit' : 'Surplus'} (
                 {Math.abs(monthlyMetrics.avgDailyCals - dailyTargets.calories)} kcal)
               </span>
@@ -414,69 +501,69 @@ export default function MonthlyCalendarSection({
           </div>
 
           {/* Average Daily Protein & Split */}
-          <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">
               <span className="flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-emerald-500" /> Average Macros
               </span>
-              <span className="text-[10px] text-slate-400">P / C / F</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">P / C / F</span>
             </div>
-            <div className="text-xl font-black text-slate-900 tabular-nums">
-              {monthlyMetrics.avgDailyProtein}g <span className="text-xs font-bold text-emerald-600">Protein</span>
+            <div className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
+              {monthlyMetrics.avgDailyProtein}g <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">Protein</span>
             </div>
-            <div className="text-[11px] text-slate-600 font-medium">
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
               Carbs: <b>{monthlyMetrics.avgDailyCarbs}g</b> • Fat: <b>{monthlyMetrics.avgDailyFat}g</b>
             </div>
-            <div className="text-[10px] text-slate-400">
+            <div className="text-[10px] text-slate-400 dark:text-slate-500">
               Protein Target: {dailyTargets.protein}g ({Math.round((monthlyMetrics.avgDailyProtein / (dailyTargets.protein || 120)) * 100)}%)
             </div>
           </div>
 
           {/* Plan Adherence Rate */}
-          <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">
               <span className="flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5 text-blue-500" /> Plan Adherence
               </span>
-              <span className="text-[10px] text-slate-400">Compliance</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">Compliance</span>
             </div>
-            <div className="text-xl font-black text-slate-900 tabular-nums">
+            <div className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
               {monthlyMetrics.complianceRate}%
             </div>
-            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+            <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
               <div
                 className="h-full bg-blue-500 transition-all duration-500"
                 style={{ width: `${monthlyMetrics.complianceRate}%` }}
               />
             </div>
-            <div className="text-[10px] text-slate-500 font-medium">
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
               {monthlyMetrics.optimalDaysCount} of {monthlyMetrics.loggedDaysCount} recorded days optimal
             </div>
           </div>
 
           {/* Clinical Guardrail & Sodium Safety */}
-          <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">
               <span className="flex items-center gap-1.5">
                 <Heart className="w-3.5 h-3.5 text-rose-500" /> Sodium & Safety
               </span>
-              <span className="text-[10px] text-slate-400">Ceiling: {dailyTargets.sodium_ceiling}mg</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">Ceiling: {dailyTargets.sodium_ceiling}mg</span>
             </div>
-            <div className="text-xl font-black text-slate-900 tabular-nums">
-              {monthlyMetrics.avgDailySodium} <span className="text-xs font-normal text-slate-500">mg/day</span>
+            <div className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
+              {monthlyMetrics.avgDailySodium} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">mg/day</span>
             </div>
             <div className="text-[10px] font-semibold mt-1">
               {monthlyMetrics.avgDailySodium <= dailyTargets.sodium_ceiling ? (
-                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 inline-block">
+                <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800 inline-block">
                   ✓ Safe Clinical Range
                 </span>
               ) : (
-                <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 inline-block">
+                <span className="text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-900 inline-block">
                   ⚠️ Above Sodium Limit
                 </span>
               )}
             </div>
-            <div className="text-[10px] text-slate-400">
+            <div className="text-[10px] text-slate-400 dark:text-slate-500">
               Total monthly meals: {monthlyMetrics.totalMealsCount}
             </div>
           </div>
@@ -486,15 +573,15 @@ export default function MonthlyCalendarSection({
       {/* 2. Main Calendar Grid + Selected Day Breakdown Split Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left / Center: Interactive Monthly Calendar Grid (7 columns) */}
-        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4 transition-colors">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-emerald-600" />
+            <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+              <CalendarIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               {MONTH_NAMES[currentMonth]} {currentYear} Calendar View
             </h3>
 
             {/* Legend */}
-            <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500">
+            <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" /> Optimal
               </span>
@@ -507,95 +594,100 @@ export default function MonthlyCalendarSection({
             </div>
           </div>
 
-          {/* Weekday Header */}
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 uppercase tracking-wider py-1 border-b border-slate-100">
-            {WEEKDAY_NAMES.map((name) => (
-              <div key={name} className="py-1">
-                {name}
+          {/* Responsive Scrollable Container to prevent overlapping cell content */}
+          <div className="overflow-x-auto pb-2">
+            <div className="min-w-[500px]">
+              {/* Weekday Header */}
+              <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider py-1 border-b border-slate-100 dark:border-slate-800">
+                {WEEKDAY_NAMES.map((name) => (
+                  <div key={name} className="py-1">
+                    {name}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Calendar Grid Cells */}
-          <div className="grid grid-cols-7 gap-1.5">
-            {calendarDays.map((item, idx) => {
-              const { dayNumber, dateStr, isCurrentMonth } = item;
-              const isSelected = selectedDate === dateStr;
-              const isToday = todayStr === dateStr;
-              const dayStat = dailyStatsMap[dateStr];
-              const status = getDayStatus(dateStr);
+              {/* Calendar Grid Cells */}
+              <div className="grid grid-cols-7 gap-1.5 mt-2">
+                {calendarDays.map((item, idx) => {
+                  const { dayNumber, dateStr, isCurrentMonth } = item;
+                  const isSelected = selectedDate === dateStr;
+                  const isToday = todayStr === dateStr;
+                  const dayStat = dailyStatsMap[dateStr];
+                  const status = getDayStatus(dateStr);
 
-              // Status background styling
-              let statusBorder = 'border-slate-100 hover:border-slate-300';
-              let statusPill = null;
+                  // Status background styling
+                  let statusBorder = 'border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700';
+                  let statusPill = null;
 
-              if (status === 'OPTIMAL') {
-                statusBorder = 'border-emerald-200 bg-emerald-50/20';
-                statusPill = 'bg-emerald-500 text-white';
-              } else if (status === 'MODERATE') {
-                statusBorder = 'border-amber-200 bg-amber-50/20';
-                statusPill = 'bg-amber-500 text-white';
-              } else if (status === 'OVER') {
-                statusBorder = 'border-rose-200 bg-rose-50/20';
-                statusPill = 'bg-rose-500 text-white';
-              }
+                  if (status === 'OPTIMAL') {
+                    statusBorder = 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/20 dark:bg-emerald-950/20';
+                    statusPill = 'bg-emerald-500 text-white';
+                  } else if (status === 'MODERATE') {
+                    statusBorder = 'border-amber-200 dark:border-amber-800 bg-amber-50/20 dark:bg-amber-950/20';
+                    statusPill = 'bg-amber-500 text-white';
+                  } else if (status === 'OVER') {
+                    statusBorder = 'border-rose-200 dark:border-rose-800 bg-rose-50/20 dark:bg-rose-950/20';
+                    statusPill = 'bg-rose-500 text-white';
+                  }
 
-              return (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedDate(dateStr)}
-                  className={`min-h-[80px] p-2 rounded-2xl border text-left flex flex-col justify-between transition-all duration-150 cursor-pointer ${
-                    isCurrentMonth ? 'bg-white' : 'bg-slate-50/50 text-slate-300 opacity-60'
-                  } ${statusBorder} ${
-                    isSelected ? 'ring-2 ring-emerald-500 shadow-md border-emerald-500' : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <span
-                      className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center ${
-                        isToday ? 'bg-emerald-600 text-white' : 'text-slate-700'
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedDate(dateStr)}
+                      className={`min-h-[80px] p-2 rounded-2xl border text-left flex flex-col justify-between transition-all duration-150 cursor-pointer ${
+                        isCurrentMonth ? 'bg-white dark:bg-slate-800/90' : 'bg-slate-50/50 dark:bg-slate-900/60 text-slate-300 dark:text-slate-600 opacity-50'
+                      } ${statusBorder} ${
+                        isSelected ? 'ring-2 ring-emerald-500 shadow-md border-emerald-500 dark:border-emerald-500' : ''
                       }`}
                     >
-                      {dayNumber}
-                    </span>
+                      <div className="flex items-center justify-between w-full">
+                        <span
+                          className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center ${
+                            isToday ? 'bg-emerald-600 text-white' : 'text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {dayNumber}
+                        </span>
 
-                    {dayStat && dayStat.meals.length > 0 && (
-                      <span className={`w-1.5 h-1.5 rounded-full ${statusPill}`} />
-                    )}
-                  </div>
+                        {dayStat && dayStat.meals.length > 0 && (
+                          <span className={`w-1.5 h-1.5 rounded-full ${statusPill}`} />
+                        )}
+                      </div>
 
-                  {/* Daily Calorie Summary in cell */}
-                  {dayStat && dayStat.meals.length > 0 ? (
-                    <div className="mt-1">
-                      <div className="text-[10px] font-extrabold text-slate-800 tabular-nums">
-                        {Math.round(dayStat.calories)} <span className="text-[8px] font-normal text-slate-400">kcal</span>
-                      </div>
-                      <div className="text-[9px] text-slate-400">
-                        {dayStat.meals.length} {dayStat.meals.length === 1 ? 'meal' : 'meals'}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[9px] text-slate-300 mt-2 italic">
-                      —
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+                      {/* Daily Calorie Summary in cell */}
+                      {dayStat && dayStat.meals.length > 0 ? (
+                        <div className="mt-1">
+                          <div className="text-[10px] font-extrabold text-slate-800 dark:text-slate-200 tabular-nums">
+                            {Math.round(dayStat.calories)} <span className="text-[8px] font-normal text-slate-400">kcal</span>
+                          </div>
+                          <div className="text-[9px] text-slate-400 dark:text-slate-500">
+                            {dayStat.meals.length} {dayStat.meals.length === 1 ? 'meal' : 'meals'}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[9px] text-slate-300 dark:text-slate-600 mt-2 italic">
+                          —
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Right: Selected Day Consumption Breakdown */}
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6 flex flex-col justify-between">
+        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6 flex flex-col justify-between transition-colors">
           <div className="space-y-5">
             {/* Header with Selected Date & Adherence Status */}
-            <div className="border-b border-slate-100 pb-4">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
                     Daily Consumption Breakdown
                   </span>
-                  <h3 className="text-base font-black text-slate-900 mt-0.5">
+                  <h3 className="text-base font-black text-slate-900 dark:text-white mt-0.5">
                     {new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {
                       weekday: 'long',
                       month: 'short',
@@ -607,22 +699,22 @@ export default function MonthlyCalendarSection({
 
                 {/* Day Status Pill */}
                 {selectedDayStatus === 'OPTIMAL' && (
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-black flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Optimal Fit
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-black flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Optimal Fit
                   </span>
                 )}
                 {selectedDayStatus === 'MODERATE' && (
-                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-black flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Moderate
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-black flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Moderate
                   </span>
                 )}
                 {selectedDayStatus === 'OVER' && (
-                  <span className="px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200 text-xs font-black flex items-center gap-1">
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600" /> Over Budget
+                  <span className="px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-black flex items-center gap-1">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" /> Over Budget
                   </span>
                 )}
                 {selectedDayStatus === 'EMPTY' && (
-                  <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-bold">
+                  <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-bold">
                     No Logs Yet
                   </span>
                 )}
@@ -630,28 +722,28 @@ export default function MonthlyCalendarSection({
 
               {/* Day Macro Gauges */}
               <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Calories</div>
-                  <div className="text-sm font-black text-slate-900 tabular-nums">
+                <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase">Calories</div>
+                  <div className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
                     {Math.round(selectedDayData.calories)}
                   </div>
-                  <div className="text-[9px] text-slate-400">of {dailyTargets.calories} kcal</div>
+                  <div className="text-[9px] text-slate-400 dark:text-slate-500">of {dailyTargets.calories} kcal</div>
                 </div>
 
-                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Protein</div>
-                  <div className="text-sm font-black text-emerald-600 tabular-nums">
+                <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase">Protein</div>
+                  <div className="text-sm font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
                     {Math.round(selectedDayData.protein)}g
                   </div>
-                  <div className="text-[9px] text-slate-400">of {dailyTargets.protein}g</div>
+                  <div className="text-[9px] text-slate-400 dark:text-slate-500">of {dailyTargets.protein}g</div>
                 </div>
 
-                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Sodium</div>
-                  <div className="text-sm font-black text-slate-800 tabular-nums">
+                <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase">Sodium</div>
+                  <div className="text-sm font-black text-slate-800 dark:text-slate-200 tabular-nums">
                     {Math.round(selectedDayData.sodium)}
                   </div>
-                  <div className="text-[9px] text-slate-400">of {dailyTargets.sodium_ceiling} mg</div>
+                  <div className="text-[9px] text-slate-400 dark:text-slate-500">of {dailyTargets.sodium_ceiling} mg</div>
                 </div>
               </div>
             </div>
@@ -659,33 +751,33 @@ export default function MonthlyCalendarSection({
             {/* List of Meals Consumed on Selected Date */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Utensils className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Utensils className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   Meals Consumed ({selectedDayData.meals.length})
                 </span>
 
                 <button
                   onClick={() => setIsAddMealModalOpen(true)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold transition cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 text-xs font-bold transition cursor-pointer"
                 >
                   <Plus className="w-3 h-3" /> Log Meal
                 </button>
               </div>
 
               {selectedDayData.meals.length === 0 ? (
-                <div className="p-6 text-center bg-slate-50/60 rounded-2xl border border-dashed border-slate-200 space-y-2">
-                  <p className="text-xs text-slate-500 font-medium">No meals logged on this date.</p>
+                <div className="p-6 text-center bg-slate-50/60 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">No meals logged on this date.</p>
                   {activePlate.length > 0 ? (
                     <button
                       onClick={handleAddActivePlateToSelectedDay}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-2xs hover:bg-emerald-700 transition cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition cursor-pointer"
                     >
                       Log Current Plate ({activePlate.length} items) Here
                     </button>
                   ) : (
                     <button
                       onClick={() => setIsAddMealModalOpen(true)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-300 transition cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer"
                     >
                       + Add Meal Entry
                     </button>
@@ -696,14 +788,14 @@ export default function MonthlyCalendarSection({
                   {selectedDayData.meals.map((meal) => (
                     <div
                       key={meal.id}
-                      className="p-3 rounded-2xl border border-slate-200/90 bg-white hover:border-slate-300 transition-all shadow-2xs space-y-2"
+                      className="p-3 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700 transition-all shadow-2xs space-y-2"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 font-bold text-[10px] uppercase tracking-wider">
+                          <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-[10px] uppercase tracking-wider">
                             {meal.mealSlot || 'Meal'}
                           </span>
-                          <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
                             <Clock className="w-3 h-3" /> {meal.timestamp || 'Logged'}
                           </span>
                         </div>
@@ -711,7 +803,7 @@ export default function MonthlyCalendarSection({
                         {onRemoveLoggedMeal && (
                           <button
                             onClick={() => onRemoveLoggedMeal(meal.id)}
-                            className="text-slate-300 hover:text-rose-500 p-1 transition cursor-pointer"
+                            className="text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 p-1 transition cursor-pointer"
                             title="Delete this meal entry"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -722,17 +814,17 @@ export default function MonthlyCalendarSection({
                       {/* Dishes consumed in this meal */}
                       <div className="space-y-1">
                         {(meal.items || []).map((dishItem, i) => (
-                          <div key={i} className="text-xs text-slate-800 font-semibold flex items-center justify-between">
+                          <div key={i} className="text-xs text-slate-800 dark:text-slate-200 font-semibold flex items-center justify-between">
                             <span>
                               {dishItem.name}{' '}
                               {dishItem.portion && dishItem.portion !== 1 && (
-                                <span className="text-[10px] text-slate-400 font-normal">
+                                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">
                                   ({dishItem.portion}x)
                                 </span>
                               )}
                             </span>
                             {dishItem.price && (
-                              <span className="text-[10px] text-slate-400 font-mono">
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
                                 {dishItem.price}
                               </span>
                             )}
@@ -741,7 +833,7 @@ export default function MonthlyCalendarSection({
                       </div>
 
                       {/* Meal Nutrients pill */}
-                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                      <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                         <span>🔥 <b>{Math.round(meal.nutrients?.calories || 0)}</b> kcal</span>
                         <span>P: <b>{Math.round(meal.nutrients?.protein || 0)}g</b></span>
                         <span>C: <b>{Math.round(meal.nutrients?.carbs || 0)}g</b></span>
@@ -757,10 +849,10 @@ export default function MonthlyCalendarSection({
 
           {/* Quick Footer Action in breakdown card */}
           {activePlate.length > 0 && selectedDayData.meals.length > 0 && (
-            <div className="pt-4 border-t border-slate-100">
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={handleAddActivePlateToSelectedDay}
-                className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                className="w-full py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Active Plate ({activePlate.length} items) to this day</span>
@@ -772,15 +864,15 @@ export default function MonthlyCalendarSection({
 
       {/* 3. Quick Log Meal Modal */}
       {isAddMealModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                <Utensils className="w-4 h-4 text-emerald-600" /> Log Meal Entry
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                <Utensils className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Log Meal Entry
               </h3>
               <button
                 onClick={() => setIsAddMealModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -788,7 +880,7 @@ export default function MonthlyCalendarSection({
 
             <form onSubmit={handleSaveCustomMeal} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-500 font-bold mb-1">Meal Slot</label>
+                <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Meal Slot</label>
                 <div className="grid grid-cols-4 gap-1.5">
                   {['Breakfast', 'Lunch', 'Dinner', 'Snacks'].map((slot) => (
                     <button
@@ -798,7 +890,7 @@ export default function MonthlyCalendarSection({
                       className={`py-1.5 text-center font-bold rounded-xl border transition cursor-pointer ${
                         newMealSlot === slot
                           ? 'bg-emerald-600 text-white border-emerald-600'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                       }`}
                     >
                       {slot}
@@ -808,7 +900,7 @@ export default function MonthlyCalendarSection({
               </div>
 
               <div>
-                <label className="block text-slate-500 font-bold mb-1">Dish Name or Description</label>
+                <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Dish Name or Description</label>
                 {dishes && dishes.length > 0 ? (
                   <div className="space-y-1.5">
                     <input
@@ -817,7 +909,7 @@ export default function MonthlyCalendarSection({
                       value={newMealDishName}
                       onChange={(e) => setNewMealDishName(e.target.value)}
                       placeholder="e.g. Lauki Channa Dal with Roti"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                       required
                     />
                     <datalist id="candidate-dishes">
@@ -832,7 +924,7 @@ export default function MonthlyCalendarSection({
                     value={newMealDishName}
                     onChange={(e) => setNewMealDishName(e.target.value)}
                     placeholder="e.g. Steamed Rice with Vegetable Sambar"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                     required
                   />
                 )}
@@ -840,39 +932,39 @@ export default function MonthlyCalendarSection({
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-slate-500 font-bold mb-1">Calories (kcal)</label>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Calories (kcal)</label>
                   <input
                     type="number"
                     value={newMealCalories}
                     onChange={(e) => setNewMealCalories(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-slate-900 text-xs font-mono"
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-bold mb-1">Protein (g)</label>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Protein (g)</label>
                   <input
                     type="number"
                     value={newMealProtein}
                     onChange={(e) => setNewMealProtein(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-slate-900 text-xs font-mono"
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-bold mb-1">Sodium (mg)</label>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1">Sodium (mg)</label>
                   <input
                     type="number"
                     value={newMealSodium}
                     onChange={(e) => setNewMealSodium(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-slate-900 text-xs font-mono"
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
                   />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsAddMealModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
                 >
                   Cancel
                 </button>
