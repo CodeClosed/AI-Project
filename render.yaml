@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: nutrimenu-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_SECRET_KEY
+        generateValue: true
+      - key: BETTER_AUTH_TRUSTED_ORIGINS
+        value: https://codeclosed.github.io,http://localhost:5173
+      - key: ALLOWED_ORIGINS
+        value: https://codeclosed.github.io,http://localhost:5173
