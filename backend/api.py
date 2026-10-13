@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 import json
 import asyncio
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, Request, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, Request, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
@@ -48,6 +48,10 @@ from backend.schemas import (
     UserOut,
     Token,
     LoginResponse,
+    RegisterResponse,
+    EmailVerifyRequest,
+    ResendVerificationRequest,
+    RefreshTokenRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     MfaVerifyRequest,
@@ -64,6 +68,28 @@ from backend.schemas import (
     PasswordChange,
     AccountDelete,
 )
+from backend.settings import settings
+from backend.auth.sessions import (
+    create_auth_session,
+    rotate_refresh_token,
+    revoke_session,
+    revoke_all_user_sessions,
+)
+from backend.auth.codes import issue_verification_code, verify_code
+from backend.auth.rate_limit import (
+    record_failed_login,
+    check_account_lockout,
+    reset_account_failures,
+)
+from backend.email_service import (
+    send_verification_email,
+    send_password_reset_email,
+    send_login_2fa_email,
+    send_new_device_alert,
+    send_password_changed_alert,
+)
+from backend.auth.routes_account import router as account_router
+from backend.maintenance import background_maintenance_worker
 from src.pipeline import MenuRecognitionPipeline
 from src.models import RecognizedMenu
 from src.matrix_generator import AIMatrixGenerator, UserNutritionalMatrix
@@ -85,14 +111,19 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables initialized successfully.")
     except Exception as e:
         logger.error("Database initialization failed: %s", e)
+    
+    # Background maintenance worker for session cleanup and GDPR account purges
+    maintenance_task = asyncio.create_task(background_maintenance_worker(interval_seconds=3600))
     yield
+    maintenance_task.cancel()
 
 app = FastAPI(
-    title="NutriMenu AI API",
-    description="Enterprise Full-Stack Backend for Menu OCR, Clinical Matrix Synthesis, User Authentication, and Encrypted Health Storage.",
+    title="NutriMenu AI Clinical Food Recommendation Engine",
+    description="Multimodal menu OCR digitization, clinical metabolic health matrix synthesis, and 3-tier recommendation engine.",
     version="2.0.0",
     lifespan=lifespan,
 )
+app.include_router(account_router)
 
 # Persistent Local File Storage for Menu Images
 UPLOAD_ROOT = Path(__file__).resolve().parent.parent / "uploads"
@@ -102,6 +133,11 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 
 # Security Response Headers Middleware
+is_production_env = (
+    os.getenv("ENVIRONMENT", "").lower() in {"prod", "production"}
+    or os.getenv("ENV", "").lower() in {"prod", "production"}
+)
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -109,6 +145,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if is_production_env:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -116,19 +154,19 @@ async def add_security_headers(request: Request, call_next):
 raw_trusted_origins = (
     os.getenv("BETTER_AUTH_TRUSTED_ORIGINS")
     or os.getenv("ALLOWED_ORIGINS")
-    or "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000"
+    or "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,https://codeclosed.github.io"
 )
-trusted_origins = [origin.strip() for origin in raw_trusted_origins.split(",") if origin.strip()]
-trusted_origin_pattern = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$|^https://[a-zA-Z0-9-]+\.github\.io$")
+trusted_origins = [origin.strip().rstrip("/") for origin in raw_trusted_origins.split(",") if origin.strip()]
+dev_localhost_pattern = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$")
 
 
 def is_trusted_origin(origin_val: Optional[str]) -> bool:
     if not origin_val:
         return True
     clean = origin_val.strip().rstrip("/")
-    if any(clean == t.rstrip("/") for t in trusted_origins):
+    if any(clean == t for t in trusted_origins):
         return True
-    if trusted_origin_pattern.match(clean):
+    if not is_production_env and dev_localhost_pattern.match(clean):
         return True
     return False
 
@@ -156,7 +194,7 @@ async def csrf_origin_guard(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=trusted_origins if trusted_origins else ["*"],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$|^https://[a-zA-Z0-9-]+\.github\.io$",
+    allow_origin_regex=None if is_production_env else r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -173,16 +211,20 @@ def user_to_out(user: User) -> UserOut:
         email=user.email,
         role=user.role,
         is_active=user.is_active,
+        is_verified=bool(user.is_verified or user.email_verified_at),
+        email_verified_at=user.email_verified_at,
         has_custom_api_key=bool(user.encrypted_api_key),
         two_factor_enabled=bool(getattr(user, "two_factor_enabled", False)),
         two_factor_method=getattr(user, "two_factor_method", "authenticator") or "authenticator",
+        deletion_requested_at=getattr(user, "deletion_requested_at", None),
+        last_login_at=getattr(user, "last_login_at", None),
         created_at=user.created_at,
     )
 
 
 @app.post(
     "/api/auth/register",
-    response_model=Token,
+    response_model=None,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit_dependency(max_requests=5, window_seconds=60, endpoint_label="register"))]
 )
@@ -212,6 +254,7 @@ def register_user(req: UserRegister, request: Request, db: Session = Depends(get
         hashed_password=hashed,
         role="user",
         is_active=True,
+        is_verified=False,
     )
     db.add(user)
     db.flush()  # populate user.id
@@ -243,9 +286,185 @@ def register_user(req: UserRegister, request: Request, db: Session = Depends(get
         status="success",
     )
 
-    # Issue JWT access token
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email, "role": user.role})
-    return Token(access_token=access_token, token_type="bearer", user=user_to_out(user))
+    if settings.is_verification_enforced():
+        code = issue_verification_code(db, user.id, purpose="email_verify")
+        try:
+            send_verification_email(user.email, code)
+        except Exception as e:
+            logger.error("Failed to send verification email: %s", e)
+
+        return RegisterResponse(
+            success=True,
+            message="Account created successfully. A 6-digit verification code has been dispatched to your email address.",
+            email=user.email,
+            verification_required=True,
+        )
+
+    # If verification not enforced in dev/test, automatically activate
+    user.is_verified = True
+    user.email_verified_at = datetime.now(timezone.utc)
+    db.commit()
+
+    access_token, refresh_token, _ = create_auth_session(db, user, request=request)
+    return Token(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=user_to_out(user),
+    )
+
+
+@app.post(
+    "/api/auth/verify-email",
+    response_model=Token,
+    dependencies=[Depends(rate_limit_dependency(max_requests=5, window_seconds=60, endpoint_label="verify_email"))]
+)
+def verify_email_address(req: EmailVerifyRequest, request: Request, db: Session = Depends(get_db)):
+    """Verifies user email with 6-digit cryptographic code and issues authenticated session."""
+    clean_email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == clean_email).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification request.")
+
+    is_valid, err_msg, _ = verify_code(db, user.id, purpose="email_verify", candidate_code=req.code)
+    if not is_valid:
+        log_audit_event(
+            event_type="auth.verify_email_failed",
+            request=request,
+            user_id=user.id,
+            email=user.email,
+            status="failure",
+            details={"reason": err_msg},
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg or "Verification failed.")
+
+    user.is_verified = True
+    user.email_verified_at = datetime.now(timezone.utc)
+    db.commit()
+
+    log_audit_event(
+        event_type="auth.email_verified",
+        request=request,
+        user_id=user.id,
+        email=user.email,
+        status="success",
+    )
+
+    access_token, refresh_token, _ = create_auth_session(db, user, request=request)
+    return Token(access_token=access_token, refresh_token=refresh_token, token_type="bearer", user=user_to_out(user))
+
+
+@app.post(
+    "/api/auth/resend-verification",
+    dependencies=[Depends(rate_limit_dependency(max_requests=3, window_seconds=60, endpoint_label="resend_verification"))]
+)
+def resend_email_verification(req: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)):
+    """Resends email verification code (anti-enumeration blind response)."""
+    clean_email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == clean_email).first()
+
+    if user and user.is_active and not user.email_verified_at:
+        code = issue_verification_code(db, user.id, purpose="email_verify")
+        try:
+            send_verification_email(user.email, code)
+        except Exception as e:
+            logger.error("Failed to send verification email: %s", e)
+
+        log_audit_event(
+            event_type="auth.resend_verification_dispatched",
+            request=request,
+            user_id=user.id,
+            email=user.email,
+            status="success",
+        )
+    else:
+        verify_dummy_password("dummy_password_timing_defense")
+
+    return {
+        "success": True,
+        "message": "If an unverified account with this email address exists, a new verification code has been dispatched."
+    }
+
+
+@app.post(
+    "/api/auth/refresh",
+    response_model=Token,
+    dependencies=[Depends(rate_limit_dependency(max_requests=30, window_seconds=60, endpoint_label="token_refresh"))]
+)
+def refresh_access_token(req: RefreshTokenRequest, request: Request, db: Session = Depends(get_db)):
+    """Rotates refresh token and issues fresh short-lived access token with reuse detection."""
+    new_access, new_refresh, user, err = rotate_refresh_token(db, req.refresh_token, request=request)
+
+    if err == "reuse_detected":
+        log_audit_event(
+            event_type="auth.token_reuse_blocked",
+            request=request,
+            status="blocked",
+            details={"reason": "revoked_token_reuse"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Security Alert: Revoked session token reuse detected. All sessions on your account have been terminated.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if err or not user or not new_access:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has expired or token is invalid. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return Token(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        token_type="bearer",
+        user=user_to_out(user),
+    )
+
+
+@app.post("/api/auth/logout")
+def logout_current_session(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Terminates current session on the server."""
+    from backend.security import extract_token_from_header, decode_access_token
+    token = extract_token_from_header(authorization)
+    if token:
+        try:
+            payload = decode_access_token(token)
+            sid = payload.get("sid")
+            user_id = payload.get("sub")
+            if sid:
+                revoke_session(db, sid, reason="user_logout")
+                log_audit_event(
+                    event_type="auth.logout_success",
+                    request=request,
+                    user_id=int(user_id) if user_id else None,
+                    details={"session_id": sid},
+                )
+        except Exception:
+            pass
+    return {"success": True, "message": "Successfully logged out."}
+
+
+@app.post("/api/auth/logout-all")
+def logout_all_sessions(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Terminates all sessions across all devices for the current user."""
+    revoked_count = revoke_all_user_sessions(db, current_user.id, reason="user_logout_all")
+    log_audit_event(
+        event_type="auth.logout_all_success",
+        request=request,
+        user_id=current_user.id,
+        details={"terminated_count": revoked_count},
+    )
+    return {"success": True, "message": f"Successfully signed out of {revoked_count} active session(s)."}
 
 
 @app.post(
@@ -255,11 +474,28 @@ def register_user(req: UserRegister, request: Request, db: Session = Depends(get
 )
 def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
     """
-    Authenticates user with constant-time dummy verification (timing-attack defense)
-    and IP-based rate limiting. Enforces 2FA challenge when two_factor_enabled.
+    Authenticates user with constant-time dummy verification, account lockout,
+    session issuance with rotating refresh tokens, and 2FA support.
     """
     clean_email = req.email.strip().lower()
     user = db.query(User).filter(User.email == clean_email).first()
+
+    # Check account lockout before password check
+    if user:
+        is_locked, remaining_secs = check_account_lockout(user)
+        if is_locked:
+            log_audit_event(
+                event_type="auth.login_locked",
+                request=request,
+                user_id=user.id,
+                email=user.email,
+                status="blocked",
+                details={"remaining_seconds": remaining_secs},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Account is temporarily locked due to multiple failed login attempts. Try again in {int(remaining_secs // 60) + 1} minute(s).",
+            )
 
     is_valid_password = False
     if user:
@@ -269,6 +505,8 @@ def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
         verify_dummy_password(req.password)
 
     if not user or not is_valid_password:
+        if user:
+            record_failed_login(db, user, request=request)
         log_audit_event(
             event_type="auth.login_failed",
             request=request,
@@ -295,6 +533,30 @@ def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
             detail="Your account has been deactivated.",
         )
 
+    # Check if account has a pending deletion request (in 14-day grace period)
+    if user.deletion_requested_at:
+        scheduled_date_str = (user.deletion_requested_at + timedelta(days=settings.deletion_grace_days)).strftime("%B %d, %Y")
+        return LoginResponse(
+            deletion_pending=True,
+            scheduled_deletion_date=scheduled_date_str,
+            email=user.email,
+        )
+
+    # Check email verification status
+    if settings.is_verification_enforced() and not user.email_verified_at:
+        code = issue_verification_code(db, user.id, purpose="email_verify")
+        try:
+            send_verification_email(user.email, code)
+        except Exception:
+            pass
+        return LoginResponse(
+            verification_required=True,
+            email=user.email,
+        )
+
+    # Reset failure counters
+    reset_account_failures(db, user)
+
     # Multi-Factor Authentication Check
     if getattr(user, "two_factor_enabled", False):
         temp_token = create_temp_2fa_token(user.id)
@@ -305,7 +567,10 @@ def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
             user.otp_purpose = "login_2fa"
             user.otp_attempts = 0
             db.commit()
-            logger.info("[DEV_EMAIL_OTP] Login 2FA code for %s: %s", user.email, otp)
+            try:
+                send_login_2fa_email(user.email, otp)
+            except Exception as e:
+                logger.error("Failed to send 2FA email: %s", e)
 
         log_audit_event(
             event_type="auth.mfa_challenge_issued",
@@ -329,8 +594,13 @@ def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
         status="success",
     )
 
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email, "role": user.role})
-    return LoginResponse(access_token=access_token, token_type="bearer", user=user_to_out(user))
+    access_token, refresh_token, _ = create_auth_session(db, user, request=request)
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=user_to_out(user),
+    )
 
 
 @app.post(
@@ -354,9 +624,8 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
         user.otp_attempts = 0
         db.commit()
 
-        # Log OTP clearly in dev console for instant developer verification
-        print(f"\n[DEV_EMAIL_OTP] Password reset verification code for {user.email}: {otp}\n", flush=True)
-        logger.info("[DEV_EMAIL_OTP] Password reset verification code for %s: %s", user.email, otp)
+        # In dev or test environments, logs indicate code issuance without printing raw secrets to stdout
+        logger.debug("Password reset verification code generated for user %s", user.email)
         log_audit_event(
             event_type="auth.forgot_password_requested",
             request=request,
@@ -374,15 +643,11 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
             status="simulated",
         )
 
-    # Standard anti-enumeration response (includes dev_code in local development if no SMTP server configured)
-    response_payload = {
+    # Standard anti-enumeration response: never leak verification codes or account existence in HTTP payloads
+    return {
         "success": True,
         "message": "If an account with this email address exists, a 6-digit verification code has been sent."
     }
-    if user and user.is_active and not os.getenv("SMTP_SERVER") and os.getenv("ENVIRONMENT") != "production":
-        response_payload["dev_code"] = otp
-
-    return response_payload
 
 
 @app.post(
@@ -457,13 +722,20 @@ def reset_password(req: ResetPasswordRequest, request: Request, db: Session = De
             detail=f"Invalid verification code. {remaining} attempt(s) remaining.",
         )
 
-    # Code is valid - update password and clear OTP
+    # Code is valid - update password, bump token_version to kill all existing sessions, and clear OTP
     user.hashed_password = hash_password(req.new_password)
+    user.token_version = (user.token_version or 0) + 1
+    revoke_all_user_sessions(db, user.id, reason="password_reset")
     user.otp_code = None
     user.otp_expires_at = None
     user.otp_purpose = None
     user.otp_attempts = 0
     db.commit()
+
+    try:
+        send_password_changed_alert(user.email)
+    except Exception:
+        pass
 
     log_audit_event(
         event_type="auth.password_reset_success",
@@ -550,8 +822,13 @@ def verify_mfa_login(req: MfaVerifyRequest, request: Request, db: Session = Depe
         status="success",
     )
 
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email, "role": user.role})
-    return LoginResponse(access_token=access_token, token_type="bearer", user=user_to_out(user))
+    access_token, refresh_token, _ = create_auth_session(db, user, request=request)
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=user_to_out(user),
+    )
 
 
 @app.post("/api/auth/mfa/setup", response_model=MfaSetupResponse)
@@ -662,7 +939,16 @@ def change_password(
         )
 
     current_user.hashed_password = hash_password(req.new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
     db.commit()
+
+    # Revoke all sessions across other devices
+    revoke_all_user_sessions(db, current_user.id, reason="password_changed")
+
+    try:
+        send_password_changed_alert(current_user.email)
+    except Exception:
+        pass
 
     log_audit_event(
         event_type="auth.password_changed",
@@ -672,7 +958,13 @@ def change_password(
         status="success",
     )
 
-    return {"success": True, "message": "Password changed successfully."}
+    access_token, refresh_token, _ = create_auth_session(db, current_user, request=request)
+    return {
+        "success": True,
+        "message": "Password changed successfully.",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
 
 
 @app.delete("/api/auth/account")

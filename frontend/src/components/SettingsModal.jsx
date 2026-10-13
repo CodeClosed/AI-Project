@@ -25,12 +25,18 @@ import {
   CheckCircle2,
   QrCode,
   KeyRound,
+  Activity,
+  Laptop,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useNutrition } from '../context/NutritionContext';
-import { changeUserPassword, deleteUserAccount, setupMfa, enableMfa, disableMfa, getApiBaseUrl, setCustomApiUrl } from '../api';
+import { changeUserPassword, setupMfa, enableMfa, disableMfa, getApiBaseUrl, setCustomApiUrl } from '../api';
 import { exportMealsToCsv, exportMealsToJson } from '../utils/exportUtils';
+import SessionsPanel from './account/SessionsPanel';
+import ChangeEmailPanel from './account/ChangeEmailPanel';
+import ActivityPanel from './account/ActivityPanel';
+import DataPrivacyPanel from './account/DataPrivacyPanel';
 
 export default function SettingsModal({ isOpen, onClose }) {
   const navigate = useNavigate();
@@ -58,12 +64,6 @@ export default function SettingsModal({ isOpen, onClose }) {
   const [disableMfaPassword, setDisableMfaPassword] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedBackupCodes, setCopiedBackupCodes] = useState(false);
-
-  // Delete Account State
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deletePassword, setDeletePassword] = useState('');
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
 
   // Dining Mode State (persisted in localStorage)
   const [diningMode, setDiningMode] = useState(() => {
@@ -228,28 +228,6 @@ export default function SettingsModal({ isOpen, onClose }) {
     }
   };
 
-  // Delete Account Submit
-  const handleDeleteAccount = async (e) => {
-    e.preventDefault();
-    setDeleteError('');
-    if (!deletePassword) {
-      setDeleteError('Please enter your password to confirm account deletion.');
-      return;
-    }
-
-    setDeleteLoading(true);
-    try {
-      await deleteUserAccount(deletePassword);
-      logout();
-      onClose();
-      navigate('/');
-    } catch (err) {
-      setDeleteError(err.message || 'Incorrect password. Deletion aborted.');
-    } finally {
-      setDeleteLoading(false);
-    }
-  };
-
   // Clear Local Data
   const handleClearCache = () => {
     if (window.confirm('Clear local meals and current plate? (If logged in, your cloud account remains safe).')) {
@@ -287,34 +265,62 @@ export default function SettingsModal({ isOpen, onClose }) {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 bg-white dark:bg-slate-900">
+        <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 bg-white dark:bg-slate-900 overflow-x-auto">
           <button
             onClick={() => setActiveTab('security')}
-            className={`py-3 px-4 text-xs font-bold border-b-2 transition flex items-center gap-2 cursor-pointer ${
+            className={`py-3 px-3.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
               activeTab === 'security'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
                 : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Shield className="w-4 h-4" />
-            <span>Account & Security</span>
+            <span>Security</span>
           </button>
+
+          {isAuthenticated && (
+            <button
+              onClick={() => setActiveTab('sessions')}
+              className={`py-3 px-3.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'sessions'
+                  ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Laptop className="w-4 h-4" />
+              <span>Devices</span>
+            </button>
+          )}
+
+          {isAuthenticated && (
+            <button
+              onClick={() => setActiveTab('activity')}
+              className={`py-3 px-3.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'activity'
+                  ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              <span>Audit Log</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveTab('data')}
-            className={`py-3 px-4 text-xs font-bold border-b-2 transition flex items-center gap-2 cursor-pointer ${
+            className={`py-3 px-3.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
               activeTab === 'data'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
                 : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Download className="w-4 h-4" />
-            <span>Data & Export</span>
+            <span>Data & Privacy</span>
           </button>
 
           <button
             onClick={() => setActiveTab('preferences')}
-            className={`py-3 px-4 text-xs font-bold border-b-2 transition flex items-center gap-2 cursor-pointer ${
+            className={`py-3 px-3.5 text-xs font-bold border-b-2 transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
               activeTab === 'preferences'
                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
                 : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -363,6 +369,9 @@ export default function SettingsModal({ isOpen, onClose }) {
                   </button>
                 )}
               </div>
+
+              {/* Change Primary Email */}
+              {isAuthenticated && <ChangeEmailPanel />}
 
               {/* Change Password Section */}
               {isAuthenticated ? (
@@ -686,79 +695,24 @@ export default function SettingsModal({ isOpen, onClose }) {
                 </div>
               ) : null}
 
-              {/* Danger Zone: Delete Account */}
-              {isAuthenticated ? (
-                <div className="p-5 rounded-2xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/60 space-y-3">
-                  <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400">
-                    <Trash2 className="w-4 h-4" />
-                    <h3 className="text-xs font-bold uppercase tracking-wider">Danger Zone</h3>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
-                    Permanently delete your NutriMenu account, saved health biometrics, and cloud meal logs. This action cannot be undone.
-                  </p>
-
-                  {!showDeleteConfirm ? (
-                    <button
-                      onClick={() => setShowDeleteConfirm(true)}
-                      className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition cursor-pointer shadow-xs"
-                    >
-                      Delete Account Permanently
-                    </button>
-                  ) : (
-                    <form onSubmit={handleDeleteAccount} className="space-y-3 pt-2">
-                      {deleteError && (
-                        <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 text-xs font-semibold">
-                          {deleteError}
-                        </div>
-                      )}
-                      <div>
-                        <label className="text-xs font-bold text-rose-700 dark:text-rose-400 block mb-1">
-                          Confirm with your password to delete:
-                        </label>
-                        <input
-                          type="password"
-                          value={deletePassword}
-                          onChange={(e) => setDeletePassword(e.target.value)}
-                          placeholder="Your current password"
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-700 text-slate-900 dark:text-white focus:outline-none"
-                          required
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="submit"
-                          disabled={deleteLoading}
-                          className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                        >
-                          {deleteLoading ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>Deleting...</span>
-                            </>
-                          ) : (
-                            <span>Confirm & Delete Permanently</span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowDeleteConfirm(false);
-                            setDeletePassword('');
-                            setDeleteError('');
-                          }}
-                          className="px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              ) : null}
             </div>
           )}
 
-          {/* TAB 2: DATA & EXPORT */}
+          {/* TAB: ACTIVE DEVICES & SESSIONS */}
+          {activeTab === 'sessions' && isAuthenticated && (
+            <div className="space-y-6">
+              <SessionsPanel />
+            </div>
+          )}
+
+          {/* TAB: SECURITY AUDIT TRAIL */}
+          {activeTab === 'activity' && isAuthenticated && (
+            <div className="space-y-6">
+              <ActivityPanel />
+            </div>
+          )}
+
+          {/* TAB: DATA & PRIVACY */}
           {activeTab === 'data' && (
             <div className="space-y-6">
               {/* Export Actions Card */}
@@ -842,6 +796,9 @@ export default function SettingsModal({ isOpen, onClose }) {
                   </div>
                 </div>
               </div>
+
+              {/* GDPR Data Archive & 14-Day Deletion Grace Period */}
+              {isAuthenticated && <DataPrivacyPanel />}
             </div>
           )}
 

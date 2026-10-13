@@ -1,11 +1,11 @@
-/**
- * Frontend API client communicating with the FastAPI backend.
- * Provides JWT auth token injection, account management, persistent database
- * synchronization for health profiles and logged meals, and OCR/recommendations.
- */
+let inMemoryAccessToken = null;
+let refreshPromise = null;
+
+const AUTH_TOKEN_KEY = 'nutrimenu_auth_token';
+const REFRESH_TOKEN_KEY = 'nutrimenu_refresh_token';
 
 export function getApiBaseUrl() {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
     const custom = localStorage.getItem('nutrimenu_custom_api_url');
     if (custom) return custom.replace(/\/+$/, '');
   }
@@ -20,6 +20,9 @@ export function getApiBaseUrl() {
 
 export function setCustomApiUrl(url) {
   try {
+    if (typeof import.meta !== 'undefined' && import.meta.env && !import.meta.env.DEV) {
+      return; // Disabled in production builds for security
+    }
     if (url && url.trim()) {
       localStorage.setItem('nutrimenu_custom_api_url', url.trim().replace(/\/+$/, ''));
     } else {
@@ -30,36 +33,97 @@ export function setCustomApiUrl(url) {
 
 export const API_BASE_URL = getApiBaseUrl();
 
-const AUTH_TOKEN_KEY = 'nutrimenu_auth_token';
-
 export function getStoredToken() {
+  return inMemoryAccessToken || (typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null);
+}
+
+export function getRefreshToken() {
   try {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(REFRESH_TOKEN_KEY) : null;
   } catch {
     return null;
   }
 }
 
-export function setStoredToken(token) {
+export function setStoredTokens(accessToken, refreshToken) {
+  inMemoryAccessToken = accessToken || null;
   try {
-    if (token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    if (accessToken) {
+      localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
     } else {
       localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+    if (refreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    } else {
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
     }
   } catch {}
 }
 
-export function clearStoredToken() {
+export function setStoredToken(token) {
+  setStoredTokens(token, getRefreshToken());
+}
+
+export function clearStoredTokens() {
+  inMemoryAccessToken = null;
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   } catch {}
 }
 
+export function clearStoredToken() {
+  clearStoredTokens();
+}
+
 /**
- * Universal wrapper for API calls with automatic Bearer token injection.
+ * Executes single-flight refresh token rotation with mutex promise.
  */
-async function fetchWithAuth(endpoint, options = {}) {
+export async function rotateTokens() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    clearStoredTokens();
+    throw new Error('No refresh token available');
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!res.ok) {
+        clearStoredTokens();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth:session_expired'));
+        }
+        throw new Error('Session expired');
+      }
+
+      const data = await res.json();
+      setStoredTokens(data.access_token, data.refresh_token);
+      return data;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+/**
+ * Universal wrapper for API calls with automatic Bearer token injection
+ * and single-flight 401 refresh token rotation retry.
+ */
+async function fetchWithAuth(endpoint, options = {}, isRetry = false) {
   const baseUrl = getApiBaseUrl();
   const url = `${baseUrl}${endpoint}`;
   const headers = { ...options.headers };
@@ -80,8 +144,23 @@ async function fetchWithAuth(endpoint, options = {}) {
       headers,
     });
 
+    if (response.status === 401 && !isRetry && getRefreshToken() && endpoint !== '/api/auth/refresh') {
+      try {
+        const rotated = await rotateTokens();
+        if (rotated?.access_token) {
+          const retryHeaders = { ...options.headers, Authorization: `Bearer ${rotated.access_token}` };
+          if (!(options.body instanceof FormData) && !retryHeaders['Content-Type']) {
+            retryHeaders['Content-Type'] = 'application/json';
+          }
+          return await fetch(url, { ...options, headers: retryHeaders });
+        }
+      } catch (rotateErr) {
+        // Fall through to 401 handler
+      }
+    }
+
     if (response.status === 401 && token) {
-      clearStoredToken();
+      clearStoredTokens();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('auth:session_expired'));
       }
@@ -114,7 +193,7 @@ export async function registerUser(email, password, profile = null) {
   }
 
   if (data.access_token) {
-    setStoredToken(data.access_token);
+    setStoredTokens(data.access_token, data.refresh_token);
   }
   return data;
 }
@@ -131,7 +210,7 @@ export async function loginUser(email, password) {
   }
 
   if (data.access_token) {
-    setStoredToken(data.access_token);
+    setStoredTokens(data.access_token, data.refresh_token);
   }
   return data;
 }
@@ -242,7 +321,7 @@ export async function verifyMfaLogin(tempToken, code) {
     throw new Error(data.detail || 'Invalid 2FA verification code.');
   }
   if (data.access_token) {
-    setStoredToken(data.access_token);
+    setStoredTokens(data.access_token, data.refresh_token);
   }
   return data;
 }
@@ -504,6 +583,146 @@ export async function pollMenuScanJob(jobId, onProgress) {
       }
     }, 600);
   });
+}
+
+// =====================================================================
+// 🛡️ ACCOUNT MANAGEMENT, SESSIONS & GDPR
+// =====================================================================
+
+export async function verifyEmailAddress(email, code) {
+  const res = await fetchWithAuth('/api/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Email verification failed.');
+  }
+  if (data.access_token) {
+    setStoredTokens(data.access_token, data.refresh_token);
+  }
+  return data;
+}
+
+export async function resendEmailVerification(email) {
+  const res = await fetchWithAuth('/api/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to resend verification code.');
+  }
+  return data;
+}
+
+export async function fetchActiveSessions() {
+  const res = await fetchWithAuth('/api/account/sessions');
+  if (!res.ok) {
+    throw new Error('Failed to load active sessions.');
+  }
+  return await res.json();
+}
+
+export async function revokeSingleSession(sessionId) {
+  const res = await fetchWithAuth(`/api/account/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to revoke session.');
+  }
+  return data;
+}
+
+export async function revokeAllOtherSessions() {
+  const res = await fetchWithAuth('/api/account/sessions/revoke-all', {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to revoke other sessions.');
+  }
+  return data;
+}
+
+export async function requestEmailChange(newEmail, password) {
+  const res = await fetchWithAuth('/api/account/email/change', {
+    method: 'POST',
+    body: JSON.stringify({ new_email: newEmail, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to request email change.');
+  }
+  return data;
+}
+
+export async function confirmEmailChange(code) {
+  const res = await fetchWithAuth('/api/account/email/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to confirm email change.');
+  }
+  return data;
+}
+
+export async function fetchAccountActivity() {
+  const res = await fetchWithAuth('/api/account/activity');
+  if (!res.ok) {
+    throw new Error('Failed to load security activity.');
+  }
+  return await res.json();
+}
+
+export async function exportAccountData(password) {
+  const res = await fetchWithAuth('/api/account/export', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to export account data.');
+  }
+  return data;
+}
+
+export async function scheduleAccountDeletion(password) {
+  const res = await fetchWithAuth('/api/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to schedule account deletion.');
+  }
+  clearStoredTokens();
+  return data;
+}
+
+export async function cancelAccountDeletion(password) {
+  const res = await fetchWithAuth('/api/account/deletion/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to cancel account deletion.');
+  }
+  if (data.access_token) {
+    setStoredTokens(data.access_token, data.refresh_token);
+  }
+  return data;
+}
+
+export async function logoutServerSession() {
+  try {
+    await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+  } catch {}
+  clearStoredTokens();
 }
 
 

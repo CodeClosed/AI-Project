@@ -6,7 +6,7 @@ import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import MfaChallengeModal from '../components/MfaChallengeModal';
 
 export default function LoginPage() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, cancelDeletion, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -16,6 +16,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
   const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [deletionPendingData, setDeletionPendingData] = useState(null);
+  const [isCancellingDeletion, setIsCancellingDeletion] = useState(false);
 
   const from = location.state?.from?.pathname || '/';
 
@@ -28,10 +30,19 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+    setDeletionPendingData(null);
     setLoading(true);
 
     try {
       const res = await login(email, password);
+      if (res?.deletion_pending) {
+        setDeletionPendingData(res);
+        return;
+      }
+      if (res?.verification_required) {
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        return;
+      }
       if (res?.mfa_required) {
         setMfaChallenge(res);
         return;
@@ -41,6 +52,20 @@ export default function LoginPage() {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancelDeletion = async () => {
+    setError(null);
+    setIsCancellingDeletion(true);
+    try {
+      await cancelDeletion(password);
+      setDeletionPendingData(null);
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError(err.message || 'Failed to restore account.');
+    } finally {
+      setIsCancellingDeletion(false);
     }
   };
 
@@ -61,6 +86,31 @@ export default function LoginPage() {
           <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {deletionPendingData && (
+          <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs space-y-3">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900 dark:text-amber-200">
+                  Account Scheduled for Deletion
+                </p>
+                <p className="mt-1 text-amber-700 dark:text-amber-400">
+                  Your account is scheduled for permanent deletion on{' '}
+                  <strong>{deletionPendingData.scheduled_deletion_date}</strong>. You can cancel this request and restore your account immediately.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleCancelDeletion}
+              disabled={isCancellingDeletion}
+              className="w-full py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
+            >
+              {isCancellingDeletion ? 'Restoring Account...' : 'Cancel Deletion & Sign In'}
+            </button>
           </div>
         )}
 

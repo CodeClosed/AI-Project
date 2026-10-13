@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB.svg?logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Styling-Tailwind%20CSS-38B2AC.svg?logo=tailwind-css)](https://tailwindcss.com/)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%203.7%20Flash-orange.svg)](https://aistudio.google.com/)
-[![Tests](https://img.shields.io/badge/Tests-96%20Passing-success.svg)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-113%20Passing-success.svg)](https://docs.pytest.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **NutriMenu AI** is an intelligent full-stack clinical recommendation platform that bridges physical restaurant menus with personalized metabolic and medical health matrices. Powered by **Google Gemini 3.7 Flash**, it digitizes complex restaurant and timetable menus, evaluates dishes against clinical guardrails, classifies them into **🟢 Tier 1: GOOD**, **🟡 Tier 2: MEDIUM**, and **🔴 Tier 3: BAD** tiers, and tracks active meal plates with multi-meal cumulative macro budgets.
@@ -83,11 +83,15 @@ graph TD
 - **Nutritional Analytics & Daily Breakdowns**: Macro split charts comparing planned intake vs. clinical targets.
 - **One-Click History Management**: Easily inspect logged dishes, modify portions, or clear historical logs.
 
-### 6. 🔒 Enterprise Security & Two-Factor Authentication (2FA)
-- **Hardened Authentication**: PBKDF2 password hashing with cryptographically secure salts.
-- **TOTP Two-Factor Authentication**: Authenticator app integration (Google Authenticator, Authy) with encrypted secret keys.
-- **Brute-Force & Rate Limiting**: Exponential backoff and IP-based rate limiting on sensitive auth endpoints.
-- **CSRF & Origin Protection**: Secure session cookies, CSRF tokens, and configurable trusted origin allowlists.
+### 6. 🔒 Enterprise Account Management & Production Security
+- **Dual-Token Session Architecture**: Short-lived (15 min) JWT access tokens paired with rotating SHA-256 hashed refresh tokens (30 days).
+- **Session Revocation & Reuse Detection**: Real-time server-side `auth_sessions` registry with family-based reuse detection that instantly terminates compromised token trees.
+- **Active Devices & Remote Sign-Out**: Interactive sessions dashboard allowing users to inspect active browsers, IP addresses, and remotely revoke sessions.
+- **Persistent Sliding-Window Rate Limiting**: Distributed database-backed rate limiting with reverse-proxy trust modeling (`TRUSTED_PROXY_COUNT`) and 10-attempt lockout defense.
+- **Email Verification & Transactional SMTP**: Mandatory email confirmation flow with 6-digit cryptographic verification codes, attempt caps, and zero sensitive code disclosure.
+- **Two-Factor Authentication (2FA/TOTP)**: RFC 6238 TOTP authenticator integration (Google Authenticator, Authy) and hashed backup codes.
+- **GDPR & CCPA Data Privacy Suite**: Self-service full JSON personal data archiving and 14-day account deletion grace period with instant recovery.
+- **Database Engine & Connection Pooling**: Production-grade PostgreSQL support via `psycopg3` with connection pooling (`pool_pre_ping=True`, `pool_size=10`, `max_overflow=20`), SSL enforcement, and Alembic migrations.
 
 ### 7. 📊 Multi-Format Export Studio
 - 📊 **CSV Spreadsheet** (`.csv`) for Excel & Google Sheets
@@ -285,19 +289,35 @@ AI-Project/
 ├── alembic.ini                   # Alembic configuration
 ├── backend/
 │   ├── api.py                    # Hardened FastAPI REST server (CORS, CSRF, Audit)
-│   ├── database.py               # SQLAlchemy SQLite engine & session management
-│   ├── db_models.py              # Persistent relational models (Users, Menus, Meals)
+│   ├── database.py               # PostgreSQL (psycopg3) connection pooling & SQLite fallback
+│   ├── db_models.py              # Persistent relational models (Users, Sessions, Audit, RateLimits)
+│   ├── email_service.py          # SMTPEmailBackend & transactional email templates
+│   ├── maintenance.py            # Lifespan background worker for session & account purge
+│   ├── settings.py               # Pydantic production invariant validation assertions
+│   ├── auth/                     # Modular authentication and account management subsystem
+│   │   ├── audit.py              # Cryptographic audit trail ledger
+│   │   ├── codes.py              # HMAC 6-digit verification code manager
+│   │   ├── deps.py               # Token verification & session revocation checks
+│   │   ├── rate_limit.py         # Persistent sliding rate limiter & account lockout
+│   │   ├── routes_account.py     # APIRouter for sessions, email change, activity, GDPR
+│   │   └── sessions.py           # Rotating refresh tokens & family reuse detection
 │   ├── jobs.py                   # Thread-safe async OCR & Recommendation job queue
 │   ├── schemas.py                # Pydantic v2 validation contracts
 │   └── security.py               # PBKDF2 hashing, JWT, TOTP 2FA, rate limiting
+├── docs/
+│   └── PRODUCTION_CHECKLIST.md   # Complete production runbook & deployment guide
 ├── frontend/
 │   ├── src/
-│   │   ├── components/           # UI Modals & Nav (Layout, Settings, MFA, ForgotPassword)
+│   │   ├── components/
+│   │   │   ├── account/          # Account management UI panels (Sessions, Activity, GDPR)
+│   │   │   ├── Layout.jsx
+│   │   │   ├── SettingsModal.jsx # Multi-tab preferences & security center
+│   │   │   └── ...
 │   │   ├── context/              # Context providers (AuthContext, NutritionContext, ThemeContext)
-│   │   ├── pages/                # Multi-page views (Dashboard, Menu, Plate, Calendar, Profile, Login)
+│   │   ├── pages/                # Multi-page views (Dashboard, Menu, Plate, VerifyEmail, Profile)
 │   │   ├── utils/                # Data export utilities (CSV / JSON)
 │   │   ├── App.jsx               # Main React router (HashRouter for GitHub Pages)
-│   │   ├── api.js                # API client with JWT injection & custom endpoint switching
+│   │   ├── api.js                # API client with JWT injection & single-flight token rotation
 │   │   └── index.css             # Tailwind CSS & design tokens
 │   ├── package.json
 │   └── vite.config.js            # Vite build configuration with copy-404 plugin
@@ -311,7 +331,11 @@ AI-Project/
 │   ├── pipeline.py               # End-to-end menu recognition pipeline
 │   ├── models.py                 # Data classes & schemas
 │   └── config.py                 # Centralized configuration & thresholds
-├── tests/                        # 100% offline pytest test suites (96 tests passing)
+├── tests/                        # 100% offline pytest test suites (113 tests passing)
+│   ├── test_account_management.py     # Active sessions, email changes & GDPR export tests
+│   ├── test_auth_sessions.py          # Token rotation & reuse detection tests
+│   ├── test_email_verification.py     # Email verification OTP flow tests
+│   ├── test_production_config.py      # Production invariant validator tests
 │   ├── test_security_and_auth.py      # Auth, brute-force & CSRF security test suite
 │   ├── test_mfa_and_password_reset.py # MFA & password reset test suite
 │   └── ...

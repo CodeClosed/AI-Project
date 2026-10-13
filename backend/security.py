@@ -277,19 +277,25 @@ def generate_backup_codes(count: int = 8) -> List[str]:
 
 def get_client_ip(request: Request) -> str:
     """
-    Extracts client IP address respecting X-Forwarded-For, X-Real-IP,
-    and client socket host.
+    Extracts client IP address safely according to reverse proxy trust configuration.
+    If TRUSTED_PROXY_COUNT > 0 (e.g. 1 on Render/Cloudflare), extracts the client IP
+    from the right of X-Forwarded-For to prevent client spoofing.
+    Otherwise, defaults to the direct client socket host.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        # First IP in X-Forwarded-For list is the originating client
-        client_ip = forwarded.split(",")[0].strip()
-        if client_ip:
-            return client_ip
+    trusted_proxy_count = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
 
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
+    if trusted_proxy_count > 0:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            ips = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if len(ips) >= trusted_proxy_count:
+                return ips[-trusted_proxy_count]
+            if ips:
+                return ips[0]
+
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
 
     if request.client and request.client.host:
         return request.client.host
@@ -465,6 +471,27 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated.",
         )
+
+    # Validate token version for global invalidation (password reset / account update)
+    token_ver = payload.get("ver")
+    if token_ver is not None and token_ver != getattr(user, "token_version", 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked due to a security update. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Check server-side session status if sid is embedded
+    session_id = payload.get("sid")
+    if session_id:
+        from backend.db_models import AuthSession
+        session_rec = db.query(AuthSession).filter(AuthSession.id == session_id).first()
+        if not session_rec or session_rec.revoked_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked or expired.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     return user
 

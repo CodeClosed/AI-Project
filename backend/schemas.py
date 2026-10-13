@@ -50,25 +50,69 @@ class UserOut(BaseModel):
     email: str
     role: str
     is_active: bool
+    is_verified: bool = False
+    email_verified_at: Optional[datetime] = None
     has_custom_api_key: bool = False
     two_factor_enabled: bool = False
     two_factor_method: Optional[str] = "authenticator"
+    deletion_requested_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
     created_at: datetime
 
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserOut
 
 
+class RegisterResponse(BaseModel):
+    success: bool = True
+    message: str
+    email: str
+    verification_required: bool = True
+
+
+class EmailVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 class LoginResponse(BaseModel):
     access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: Optional[UserOut] = None
     mfa_required: bool = False
     temp_token: Optional[str] = None
     two_factor_method: Optional[str] = None
+    verification_required: bool = False
+    email: Optional[str] = None
+    deletion_pending: bool = False
+    scheduled_deletion_date: Optional[str] = None
 
 
 class PasswordChange(BaseModel):
@@ -87,6 +131,44 @@ class PasswordChange(BaseModel):
 
 class AccountDelete(BaseModel):
     password: str
+
+
+class CancelDeletionRequest(BaseModel):
+    password: str
+
+
+class EmailChangeRequest(BaseModel):
+    new_email: EmailStr
+    password: str
+
+    @field_validator("new_email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class EmailChangeConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class SessionOut(BaseModel):
+    id: str
+    device_label: str
+    ip_address: Optional[str] = None
+    created_at: datetime
+    last_used_at: datetime
+    is_current: bool = False
+
+
+class ActivityOut(BaseModel):
+    id: int
+    event: str
+    status: str
+    ip_address: Optional[str] = None
+    created_at: datetime
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -141,6 +223,7 @@ class MfaEnableRequest(BaseModel):
 
 class MfaDisableRequest(BaseModel):
     password: str
+    code: Optional[str] = None
 
 
 

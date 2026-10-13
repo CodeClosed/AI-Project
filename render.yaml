@@ -6,13 +6,29 @@ services:
     region: oregon
     healthCheckPath: /api/health
     envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"
       - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
         sync: false
       - key: BETTER_AUTH_SECRET
         generateValue: true
       - key: ENCRYPTION_SECRET_KEY
         generateValue: true
       - key: BETTER_AUTH_TRUSTED_ORIGINS
-        value: https://codeclosed.github.io,http://localhost:5173
+        value: https://codeclosed.github.io
       - key: ALLOWED_ORIGINS
-        value: https://codeclosed.github.io,http://localhost:5173
+        value: https://codeclosed.github.io
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false

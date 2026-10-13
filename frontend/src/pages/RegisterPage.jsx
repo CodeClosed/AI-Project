@@ -38,7 +38,11 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      await register(email, password, profile);
+      const res = await register(email, password, profile);
+      if (res && res.verification_required) {
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`, { replace: true });
+        return;
+      }
       navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Registration failed. Please try again.');

@@ -8,7 +8,6 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialEmail = ''
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [devCode, setDevCode] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,7 +27,6 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialEmail = ''
       setOtpCode('');
       setNewPassword('');
       setConfirmPassword('');
-      setDevCode('');
       setError(null);
       setLoading(false);
       return;
@@ -69,10 +67,7 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialEmail = ''
     setError(null);
     setLoading(true);
     try {
-      const res = await requestForgotPassword(email.trim());
-      if (res?.dev_code) {
-        setDevCode(res.dev_code);
-      }
+      await requestForgotPassword(email.trim());
       setStep(2);
       setCountdown(600);
       setResendCooldown(30);
@@ -88,10 +83,7 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialEmail = ''
     setError(null);
     setLoading(true);
     try {
-      const res = await requestForgotPassword(email.trim());
-      if (res?.dev_code) {
-        setDevCode(res.dev_code);
-      }
+      await requestForgotPassword(email.trim());
       setCountdown(600);
       setResendCooldown(45);
     } catch (err) {
@@ -223,24 +215,6 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialEmail = ''
               <div className="mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
-              </div>
-            )}
-
-            {devCode && (
-              <div className="mt-4 p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs flex items-center justify-between gap-3 animate-in fade-in">
-                <div>
-                  <span className="font-bold text-amber-900 dark:text-amber-200 block">Development Reset Code</span>
-                  <span className="text-[11px] text-amber-700 dark:text-amber-400">
-                    Code: <strong className="font-mono text-xs tracking-widest text-amber-950 dark:text-amber-100">{devCode}</strong> (since SMTP email is not configured)
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOtpCode(devCode)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition cursor-pointer shadow-xs shrink-0"
-                >
-                  Auto-Fill
-                </button>
               </div>
             )}
 

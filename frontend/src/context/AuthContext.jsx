@@ -1,13 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   getStoredToken,
-  setStoredToken,
-  clearStoredToken,
+  getRefreshToken,
+  setStoredTokens,
+  clearStoredTokens,
   loginUser as apiLogin,
   registerUser as apiRegister,
   verifyMfaLogin,
   fetchCurrentUser,
-  fetchUserProfile,
+  verifyEmailAddress,
+  resendEmailVerification,
+  cancelAccountDeletion,
+  logoutServerSession,
 } from '../api';
 
 const AuthContext = createContext(null);
@@ -16,11 +20,14 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => getStoredToken());
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(false);
 
   // Re-check authentication and fetch profile on app start
   const refreshUser = useCallback(async () => {
     const savedToken = getStoredToken();
-    if (!savedToken) {
+    const savedRefreshToken = getRefreshToken();
+
+    if (!savedToken && !savedRefreshToken) {
       setUser(null);
       setToken(null);
       setIsLoading(false);
@@ -31,7 +38,7 @@ export function AuthProvider({ children }) {
       const userData = await fetchCurrentUser();
       if (userData) {
         setUser(userData);
-        setToken(savedToken);
+        setToken(getStoredToken());
         return userData;
       } else {
         setUser(null);
@@ -41,7 +48,7 @@ export function AuthProvider({ children }) {
       console.warn('Authentication token verification failed:', err);
       setUser(null);
       setToken(null);
-      clearStoredToken();
+      clearStoredTokens();
     } finally {
       setIsLoading(false);
     }
@@ -52,11 +59,24 @@ export function AuthProvider({ children }) {
     refreshUser();
   }, [refreshUser]);
 
+  // Sync logout across browser tabs
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'nutrimenu_refresh_token' && !e.newValue) {
+        setUser(null);
+        setToken(null);
+        clearStoredTokens();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const login = async (email, password) => {
     setIsLoading(true);
     try {
       const res = await apiLogin(email, password);
-      if (res.mfa_required) {
+      if (res.verification_required || res.mfa_required) {
         return res;
       }
       setToken(res.access_token);
@@ -83,18 +103,63 @@ export function AuthProvider({ children }) {
     setIsLoading(true);
     try {
       const res = await apiRegister(email, password, profile);
-      setToken(res.access_token);
-      setUser(res.user);
-      return res.user;
+      if (res.verification_required) {
+        return res;
+      }
+      if (res.access_token) {
+        setToken(res.access_token);
+      }
+      if (res.user) {
+        setUser(res.user);
+      }
+      return res;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(false);
+  const verifyEmail = async (email, code) => {
+    setIsLoading(true);
+    try {
+      const res = await verifyEmailAddress(email, code);
+      if (res.access_token) {
+        setToken(res.access_token);
+      }
+      if (res.user) {
+        setUser(res.user);
+      }
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const logout = () => {
-    clearStoredToken();
+  const resendVerification = async (email) => {
+    return await resendEmailVerification(email);
+  };
+
+  const cancelDeletion = async (password) => {
+    setIsLoading(true);
+    try {
+      const res = await cancelAccountDeletion(password);
+      if (res.access_token) {
+        setToken(res.access_token);
+      }
+      if (res.user) {
+        setUser(res.user);
+      }
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await logoutServerSession();
+    } catch {}
+
+    clearStoredTokens();
     setToken(null);
     setUser(null);
 
@@ -132,6 +197,9 @@ export function AuthProvider({ children }) {
     login,
     completeMfaLogin,
     register,
+    verifyEmail,
+    resendVerification,
+    cancelDeletion,
     logout,
     refreshUser,
     sessionExpiredNotice,
