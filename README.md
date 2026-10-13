@@ -78,7 +78,18 @@ graph TD
 - **Multi-Meal History**: Log meals (Breakfast, Lunch, Snacks, Dinner) with timestamps and individual dish breakdowns preserved in browser storage (`localStorage`).
 - **✨ Complete My Plate (AI Gap-Filler)**: Scans remaining menu items to suggest 1–2 complementary companion dishes balancing missing protein/fiber, with strict vegetarian and allergen exclusions.
 
-### 5. 📊 Multi-Format Export Studio
+### 5. 📅 Monthly Calendar & Historical Analytics
+- **Interactive Calendar View**: Browse past meal intake by date and month to inspect daily nutritional compliance.
+- **Nutritional Analytics & Daily Breakdowns**: Macro split charts comparing planned intake vs. clinical targets.
+- **One-Click History Management**: Easily inspect logged dishes, modify portions, or clear historical logs.
+
+### 6. 🔒 Enterprise Security & Two-Factor Authentication (2FA)
+- **Hardened Authentication**: PBKDF2 password hashing with cryptographically secure salts.
+- **TOTP Two-Factor Authentication**: Authenticator app integration (Google Authenticator, Authy) with encrypted secret keys.
+- **Brute-Force & Rate Limiting**: Exponential backoff and IP-based rate limiting on sensitive auth endpoints.
+- **CSRF & Origin Protection**: Secure session cookies, CSRF tokens, and configurable trusted origin allowlists.
+
+### 7. 📊 Multi-Format Export Studio
 - 📊 **CSV Spreadsheet** (`.csv`) for Excel & Google Sheets
 - 📝 **Markdown Report** (`.md`) for Obsidian, Notion & GitHub
 - 🖨️ **Printable HTML / PDF** (`.html`) ready to print or save
@@ -143,7 +154,7 @@ python run_ui.py
 
 ## 🧪 Automated Test Suite
 
-All 70 test suites run 100% offline:
+All 96 unit and integration tests run 100% offline:
 
 ```bash
 python -m pytest -v
@@ -152,18 +163,20 @@ python -m pytest -v
 ### Test Coverage Highlights:
 | Test Module | Focus Area | Status |
 | :--- | :--- | :---: |
-| `tests/test_plate_optimizer.py` | Multi-dish nutrient estimation, burn-down math, vegetarian safety | ✅ PASSED (4/4) |
-| `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | ✅ PASSED (6/6) |
+| `tests/test_security_and_auth.py` | CSRF protection, secure cookies, PBKDF2 hashing, rate limiting, IP tracking | ✅ PASSED (15/15) |
+| `tests/test_mfa_and_password_reset.py` | TOTP MFA verification, secret encryption, password recovery flows | ✅ PASSED (11/11) |
+| `tests/test_extraction_validator.py` | Validation rules, confidence scoring, OCR schema compliance | ✅ PASSED (12/12) |
+| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, candidate failover | ✅ PASSED (9/9) |
 | `tests/test_safety_and_rules.py` | Strict allergen exclusions (score = 0), diabetic glycemic penalties | ✅ PASSED (7/7) |
 | `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | ✅ PASSED (7/7) |
-| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, candidate failover | ✅ PASSED (9/9) |
+| `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | ✅ PASSED (6/6) |
+| `tests/test_openrouter_extractor.py` | Vision extractor fallback pipeline | ✅ PASSED (6/6) |
+| `tests/test_nutrition_ai.py` | Dish evaluator, macro splits, markdown serialization | ✅ PASSED (5/5) |
+| `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | ✅ PASSED (5/5) |
+| `tests/test_plate_optimizer.py` | Multi-dish nutrient estimation, burn-down math, vegetarian safety | ✅ PASSED (4/4) |
+| `tests/test_config.py` | Config getters, API key detection, fallback candidates | ✅ PASSED (4/4) |
 | `tests/test_matrix_generator.py` | Metabolic energy equations, macro distribution, clinical vectors | ✅ PASSED (3/3) |
 | `tests/test_integration_pipeline.py` | End-to-end OCR $\to$ Matrix $\to$ 3-Tier Matchmaker | ✅ PASSED (2/2) |
-| `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | ✅ PASSED (5/5) |
-| `tests/test_nutrition_ai.py` | Dish evaluator, macro splits, markdown serialization | ✅ PASSED (5/5) |
-| `tests/test_config.py` | Config getters, API key detection, fallback candidates | ✅ PASSED (4/4) |
-| `tests/test_extraction_validator.py` | Validation rules, confidence scoring | ✅ PASSED (12/12) |
-| `tests/test_openrouter_extractor.py` | Vision extractor fallback pipeline | ✅ PASSED (6/6) |
 
 ---
 
@@ -213,7 +226,32 @@ Interactive documentation is available at [http://127.0.0.1:8000/docs](http://12
 
 ---
 
-## 🚀 Deployment & GitHub Pages
+## 🚀 Deployment Guide
+
+### 🐳 Backend Docker Containerization & Cloud Deployment (Render / Railway)
+
+The backend provides a production-ready, slim Linux Docker image with CPU-only PyTorch and OpenCV image processing runtime:
+
+#### Run with Docker Locally:
+```bash
+# Build the Docker image
+docker build -t nutrimenu-backend .
+
+# Run the container (binds to http://localhost:8000)
+docker run -p 8000:8000 \
+  -e GEMINI_API_KEY="your_gemini_api_key" \
+  -e ALLOWED_ORIGINS="http://localhost:5173,https://codeclosed.github.io" \
+  nutrimenu-backend
+```
+
+#### One-Click Cloud Blueprint (`render.yaml`):
+The repository includes a ready-to-use Render Blueprint specification:
+1. Connect your repository to [Render](https://render.com/).
+2. Select **New** $\to$ **Blueprint** and pick `render.yaml`.
+3. In the environment variables configuration, fill in your `GEMINI_API_KEY`.
+4. Render automatically configures container builds, dynamic PORT binding (`${PORT:-8000}`), auto-generates secret keys, and attaches `/api/health` health checks.
+
+---
 
 ### 🌐 Deploying the Frontend to GitHub Pages
 
@@ -240,7 +278,11 @@ AI-Project/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml            # Automated GitHub Pages CI/CD workflow
-├── alembic/                      # Alembic schema versioning & migrations
+├── .dockerignore                 # Docker build ignore patterns
+├── Dockerfile                    # Multi-stage slim Docker image for FastAPI backend
+├── render.yaml                   # Infrastructure-as-Code Blueprint for Render cloud
+├── alembic/                      # Alembic schema versioning & database migrations
+├── alembic.ini                   # Alembic configuration
 ├── backend/
 │   ├── api.py                    # Hardened FastAPI REST server (CORS, CSRF, Audit)
 │   ├── database.py               # SQLAlchemy SQLite engine & session management
@@ -270,8 +312,8 @@ AI-Project/
 │   ├── models.py                 # Data classes & schemas
 │   └── config.py                 # Centralized configuration & thresholds
 ├── tests/                        # 100% offline pytest test suites (96 tests passing)
-│   ├── test_mfa_and_password_reset.py # MFA & password reset test suite
 │   ├── test_security_and_auth.py      # Auth, brute-force & CSRF security test suite
+│   ├── test_mfa_and_password_reset.py # MFA & password reset test suite
 │   └── ...
 ├── app.py                        # Streamlit application
 ├── run_fullstack.py              # Full-stack launcher (FastAPI + React)
