@@ -616,6 +616,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
     clean_email = req.email.strip().lower()
     user = db.query(User).filter(User.email == clean_email).first()
 
+    dev_code = None
     if user and user.is_active:
         otp = generate_secure_otp(6)
         user.otp_code = otp
@@ -624,7 +625,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
         user.otp_attempts = 0
         db.commit()
 
-        # In dev or test environments, logs indicate code issuance without printing raw secrets to stdout
+        # In dev or test environments, logs indicate code issuance
         logger.debug("Password reset verification code generated for user %s", user.email)
         log_audit_event(
             event_type="auth.forgot_password_requested",
@@ -633,6 +634,15 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
             email=user.email,
             status="success",
         )
+
+        try:
+            send_password_reset_email(user.email, otp)
+        except Exception as e:
+            logger.error("Failed to send password reset email: %s", e)
+
+        # In local development without configured SMTP, surface dev_code for offline testing & demo
+        if not settings.is_production and not settings.smtp_host:
+            dev_code = otp
     else:
         # Constant-time dummy verification prevents timing attacks
         verify_dummy_password("dummy_password_timing_defense")
@@ -643,11 +653,13 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
             status="simulated",
         )
 
-    # Standard anti-enumeration response: never leak verification codes or account existence in HTTP payloads
-    return {
+    res = {
         "success": True,
         "message": "If an account with this email address exists, a 6-digit verification code has been sent."
     }
+    if dev_code:
+        res["dev_code"] = dev_code
+    return res
 
 
 @app.post(

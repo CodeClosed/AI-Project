@@ -33,6 +33,15 @@ class ConsoleEmailBackend(BaseEmailBackend):
     def send(self, message: EmailMessage) -> bool:
         self.outbox.append(message)
         logger.info("[DEV EMAIL OUTBOX] To: %s | Subject: %s", message.to, message.subject)
+        if settings.environment != "production":
+            try:
+                print(f"\n=======================================================", flush=True)
+                print(f"[DEV EMAIL OUTBOX] To: {message.to}", flush=True)
+                print(f"Subject: {message.subject}", flush=True)
+                print(f"{message.text_body}", flush=True)
+                print(f"=======================================================\n", flush=True)
+            except Exception:
+                pass
         return True
 
     def clear(self):
