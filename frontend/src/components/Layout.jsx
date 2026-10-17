@@ -274,29 +274,10 @@ export default function Layout() {
             </div>
           </div>
         </div>
-
-        {/* Mobile Navigation Sub-Bar (Slim, compact) */}
-        <div className="md:hidden border-t border-slate-200 dark:border-slate-800 px-3 py-1.5 flex items-center justify-around bg-slate-50 dark:bg-slate-900 text-xs font-bold">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'text-emerald-700 dark:text-emerald-400 font-black' : 'text-slate-600 dark:text-slate-400')}>
-            Dashboard
-          </NavLink>
-          <NavLink to="/menu" className={({ isActive }) => (isActive ? 'text-emerald-700 dark:text-emerald-400 font-black' : 'text-slate-600 dark:text-slate-400')}>
-            Scanner {dishes.length > 0 && `(${dishes.length})`}
-          </NavLink>
-          <NavLink to="/plate" className={({ isActive }) => (isActive ? 'text-emerald-700 dark:text-emerald-400 font-black' : 'text-slate-600 dark:text-slate-400')}>
-            Plate {plate.length > 0 && `(${plate.length})`}
-          </NavLink>
-          <NavLink to="/calendar" className={({ isActive }) => (isActive ? 'text-emerald-700 dark:text-emerald-400 font-black' : 'text-slate-600 dark:text-slate-400')}>
-            Calendar {loggedMeals.length > 0 && `(${loggedMeals.length})`}
-          </NavLink>
-          <NavLink to="/profile" className={({ isActive }) => (isActive ? 'text-emerald-700 dark:text-emerald-400 font-black' : 'text-slate-600 dark:text-slate-400')}>
-            Profile
-          </NavLink>
-        </div>
       </header>
 
       {/* Main Outlet for Routed Pages */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-24 md:pb-8 flex-1 w-full space-y-8">
         <Outlet />
       </main>
 
@@ -352,6 +333,95 @@ export default function Layout() {
           </p>
         </div>
       </footer>
+
+      {/* Mobile Fixed Bottom Navigation Bar (Native Mobile Experience) */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/90 dark:border-slate-800 px-3 py-2 flex items-center justify-around shadow-2xl transition-colors">
+        <NavLink
+          to="/"
+          end
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              isActive
+                ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`
+          }
+        >
+          <LayoutDashboard className="w-4 h-4" />
+          <span>Dashboard</span>
+        </NavLink>
+
+        <NavLink
+          to="/menu"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-[10px] font-bold transition-all cursor-pointer relative ${
+              isActive
+                ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`
+          }
+        >
+          <Salad className="w-4 h-4" />
+          <span>Scanner</span>
+          {dishes.length > 0 && (
+            <span className="absolute top-0 right-1 px-1.5 py-0.2 rounded-full bg-emerald-600 text-white text-[9px] font-black">
+              {dishes.length}
+            </span>
+          )}
+        </NavLink>
+
+        <NavLink
+          to="/plate"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-[10px] font-bold transition-all cursor-pointer relative ${
+              isActive
+                ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`
+          }
+        >
+          <Utensils className="w-4 h-4" />
+          <span>Plate</span>
+          {plate.length > 0 && (
+            <span className="absolute top-0 right-1 px-1.5 py-0.2 rounded-full bg-emerald-600 text-white text-[9px] font-black animate-pulse">
+              {plate.length}
+            </span>
+          )}
+        </NavLink>
+
+        <NavLink
+          to="/calendar"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-[10px] font-bold transition-all cursor-pointer relative ${
+              isActive
+                ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`
+          }
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Calendar</span>
+          {loggedMeals.length > 0 && (
+            <span className="absolute top-0 right-1 px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[9px] font-black">
+              {loggedMeals.length}
+            </span>
+          )}
+        </NavLink>
+
+        <NavLink
+          to="/profile"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              isActive
+                ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`
+          }
+        >
+          <HeartPulse className="w-4 h-4" />
+          <span>Profile</span>
+        </NavLink>
+      </nav>
     </div>
   );
 }

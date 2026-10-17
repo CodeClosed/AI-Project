@@ -45,9 +45,19 @@ export default function PlatePage() {
   const [loadingEval, setLoadingEval] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState('Lunch');
+
+  const getDefaultMealSlot = () => {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 11) return 'Breakfast';
+    if (h >= 11 && h < 16) return 'Lunch';
+    if (h >= 16 && h < 19) return 'Snacks';
+    return 'Dinner';
+  };
+
+  const [selectedSlot, setSelectedSlot] = useState(getDefaultMealSlot);
   const [showHistory, setShowHistory] = useState(true);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showGuardrailWarningModal, setShowGuardrailWarningModal] = useState(false);
 
   const todayStr = (() => {
     const d = new Date();
@@ -137,41 +147,6 @@ export default function PlatePage() {
     } finally {
       setLoadingSuggestions(false);
     }
-  };
-
-  // Log active plate to today's meal history
-  const handleLogAndSaveMeal = () => {
-    if (!plate || plate.length === 0 || !handleSaveMealToLog) return;
-    const now = new Date();
-    const nut = evalData?.total_nutrients || { calories: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, fiber: 0 };
-    const mealEntry = {
-      id: `${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: `${selectedSlot} Plate`,
-      meal_type: selectedSlot,
-      mealSlot: selectedSlot,
-      date: todayStr,
-      timestamp: now.toISOString(),
-      dishes: plate.map((p) => ({
-        name: p.name,
-        portion: p.portion || 1.0,
-        price: p.price || '',
-      })),
-      items: plate.map((p) => ({
-        name: p.name,
-        portion: p.portion || 1.0,
-        price: p.price || '',
-      })),
-      nutrients: nut,
-      total_calories: Number(nut.calories) || 0,
-      total_protein: Number(nut.protein) || 0,
-      total_carbs: Number(nut.carbs) || 0,
-      total_fats: Number(nut.fat) || 0,
-      total_sodium: Number(nut.sodium) || 0,
-    };
-
-    handleSaveMealToLog(mealEntry);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3500);
   };
 
   const currentPlateNutrients = evalData?.total_nutrients || {
@@ -298,6 +273,52 @@ export default function PlatePage() {
 
     return alerts;
   }, [plate, combinedSodium, combinedCals, dailyTargets, remDailySodium, profile, dishes]);
+
+  // Commit staged plate to today's meal history
+  const commitMealLog = () => {
+    if (!plate || plate.length === 0 || !handleSaveMealToLog) return;
+    const now = new Date();
+    const nut = evalData?.total_nutrients || { calories: 0, protein: 0, carbs: 0, fat: 0, sodium: 0, fiber: 0 };
+    const mealEntry = {
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      name: `${selectedSlot} Plate`,
+      meal_type: selectedSlot,
+      mealSlot: selectedSlot,
+      date: todayStr,
+      timestamp: now.toISOString(),
+      dishes: plate.map((p) => ({
+        name: p.name,
+        portion: p.portion || 1.0,
+        price: p.price || '',
+      })),
+      items: plate.map((p) => ({
+        name: p.name,
+        portion: p.portion || 1.0,
+        price: p.price || '',
+      })),
+      nutrients: nut,
+      total_calories: Number(nut.calories) || 0,
+      total_protein: Number(nut.protein) || 0,
+      total_carbs: Number(nut.carbs) || 0,
+      total_fats: Number(nut.fat) || 0,
+      total_sodium: Number(nut.sodium) || 0,
+    };
+
+    handleSaveMealToLog(mealEntry);
+    setSaveSuccess(true);
+    setShowGuardrailWarningModal(false);
+    setTimeout(() => setSaveSuccess(false), 3500);
+  };
+
+  const handleLogAndSaveMeal = () => {
+    if (!plate || plate.length === 0 || !handleSaveMealToLog) return;
+    const hasDangerAlert = (clinicalAlerts || []).some((a) => a.type === 'danger');
+    if (hasDangerAlert) {
+      setShowGuardrailWarningModal(true);
+      return;
+    }
+    commitMealLog();
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -766,6 +787,51 @@ export default function PlatePage() {
           </div>
         </div>
       </div>
+
+      {/* Pre-Log Clinical Guardrail Safety Modal */}
+      {showGuardrailWarningModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-rose-200 dark:border-rose-900/60 shadow-2xl p-6 sm:p-7 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shadow-xs">
+              <ShieldAlert className="w-6 h-6 stroke-[2.5]" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Clinical Safety Guardrail Alert
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                Your currently staged plate exceeds one or more clinical limits configured in your Health Profile:
+              </p>
+            </div>
+
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {clinicalAlerts.filter((a) => a.type === 'danger').map((alert, idx) => (
+                <div key={idx} className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs">
+                  <div className="font-bold text-rose-900 dark:text-rose-200">{alert.title}</div>
+                  <div className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5">{alert.message}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowGuardrailWarningModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Adjust Portions First
+              </button>
+              <button
+                type="button"
+                onClick={commitMealLog}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                Log Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

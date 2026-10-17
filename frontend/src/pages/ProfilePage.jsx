@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Heart,
@@ -16,6 +16,7 @@ import {
   FileText,
   Stethoscope,
   Sliders,
+  Activity,
 } from 'lucide-react';
 import { useNutrition } from '../context/NutritionContext';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +35,40 @@ export default function ProfilePage() {
   } = useNutrition();
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [unitSystem, setUnitSystem] = useState(() => {
+    try {
+      return localStorage.getItem('nutrimenu_units') || 'metric';
+    } catch {
+      return 'metric';
+    }
+  });
+
+  const handleUnitSystemChange = (system) => {
+    setUnitSystem(system);
+    try {
+      localStorage.setItem('nutrimenu_units', system);
+    } catch {}
+  };
+
+  const bmi = useMemo(() => {
+    const hMeters = (profile.height_cm || 0) / 100;
+    const wKg = profile.weight_kg || 0;
+    if (!hMeters || !wKg) return null;
+    const val = wKg / (hMeters * hMeters);
+    let category = 'Normal Weight';
+    let badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700';
+    if (val < 18.5) {
+      category = 'Underweight';
+      badgeColor = 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 border-sky-300 dark:border-sky-700';
+    } else if (val >= 25 && val < 30) {
+      category = 'Overweight';
+      badgeColor = 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300 dark:border-amber-700';
+    } else if (val >= 30) {
+      category = 'Obese';
+      badgeColor = 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-300 dark:border-rose-700';
+    }
+    return { value: val.toFixed(1), category, badgeColor };
+  }, [profile.height_cm, profile.weight_kg]);
 
   const conditionsList = [
     { id: 'hypertension', label: 'Hypertension', icon: '🫀' },
@@ -161,10 +196,37 @@ export default function ProfilePage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Card 1: Physical Biometrics */}
           <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-4">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Scale className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              <span>Biometric Fundamentals</span>
-            </h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Scale className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <span>Biometric Fundamentals</span>
+              </h2>
+
+              <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => handleUnitSystemChange('metric')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    unitSystem === 'metric'
+                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Metric (cm / kg)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUnitSystemChange('imperial')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    unitSystem === 'imperial'
+                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Imperial (ft-in / lbs)
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
@@ -191,30 +253,104 @@ export default function ProfilePage() {
                 </select>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Height (cm)</label>
-                <input
-                  type="number"
-                  min="100"
-                  max="250"
-                  value={profile.height_cm || ''}
-                  onChange={(e) => handleFieldChange('height_cm', Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
-                />
-              </div>
+              {unitSystem === 'metric' ? (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Height (cm)</label>
+                    <input
+                      type="number"
+                      min="100"
+                      max="250"
+                      value={profile.height_cm || ''}
+                      onChange={(e) => handleFieldChange('height_cm', Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
+                    />
+                  </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Weight (kg)</label>
-                <input
-                  type="number"
-                  min="30"
-                  max="300"
-                  value={profile.weight_kg || ''}
-                  onChange={(e) => handleFieldChange('weight_kg', Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
-                />
-              </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Weight (kg)</label>
+                    <input
+                      type="number"
+                      min="30"
+                      max="300"
+                      value={profile.weight_kg || ''}
+                      onChange={(e) => handleFieldChange('weight_kg', Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Height (ft & in)</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="3"
+                          max="8"
+                          placeholder="5"
+                          value={Math.floor((profile.height_cm || 0) / 30.48) || ''}
+                          onChange={(e) => {
+                            const ft = Number(e.target.value) || 0;
+                            const curInches = Math.round(((profile.height_cm || 0) % 30.48) / 2.54);
+                            const totalInches = (ft * 12) + curInches;
+                            handleFieldChange('height_cm', Math.round(totalInches * 2.54));
+                          }}
+                          className="w-full pl-2 pr-5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
+                        />
+                        <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">ft</span>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="0"
+                          max="11"
+                          placeholder="10"
+                          value={Math.round(((profile.height_cm || 0) % 30.48) / 2.54) || ''}
+                          onChange={(e) => {
+                            const inches = Number(e.target.value) || 0;
+                            const curFeet = Math.floor((profile.height_cm || 0) / 30.48);
+                            const totalInches = (curFeet * 12) + inches;
+                            handleFieldChange('height_cm', Math.round(totalInches * 2.54));
+                          }}
+                          className="w-full pl-2 pr-5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
+                        />
+                        <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">in</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block mb-1">Weight (lbs)</label>
+                    <input
+                      type="number"
+                      min="65"
+                      max="660"
+                      value={profile.weight_kg ? Math.round(profile.weight_kg * 2.20462) : ''}
+                      onChange={(e) => {
+                        const lbs = Number(e.target.value) || 0;
+                        handleFieldChange('weight_kg', Math.round((lbs / 2.20462) * 10) / 10);
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-semibold focus:outline-emerald-500"
+                    />
+                  </div>
+                </>
+              )}
             </div>
+
+            {bmi && (
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                  <Activity className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-semibold">Calculated Body Mass Index (BMI):</span>
+                  <span className="font-black text-slate-900 dark:text-white text-sm">{bmi.value}</span>
+                </div>
+                <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-black ${bmi.badgeColor}`}>
+                  {bmi.category}
+                </span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
               <div>

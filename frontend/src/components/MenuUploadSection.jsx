@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   FileText,
   RotateCcw,
+  Camera,
 } from 'lucide-react';
 import { uploadMenuImage, startMenuScanJob, pollMenuScanJob, API_BASE_URL } from '../api';
 import { useNutrition } from '../context/NutritionContext';
@@ -72,6 +73,7 @@ export default function MenuUploadSection({
     'Steamed Edamame | Fresh steamed soybeans with sea salt | $5.99\nGrilled Lemon Chicken | Herb grilled chicken breast with roasted broccoli | $14.50\nPalak Paneer with Whole Wheat Roti | Fresh spinach puree with cottage cheese | $13.50\nCrispy Deep Fried Mozzarella Sticks | Breaded cheese sticks fried with marinara | $7.99'
   );
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -309,6 +311,14 @@ export default function MenuUploadSection({
                 onChange={handleFileChange}
                 className="hidden"
               />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileChange}
+                className="hidden"
+              />
 
               {ocrLoading && (
                 <div className="absolute inset-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md z-20 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
@@ -399,11 +409,30 @@ export default function MenuUploadSection({
                   <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 shadow-xs">
                     <UploadCloud className="w-7 h-7" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">Click or drag & drop menu photo</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">PNG, JPG, or JPEG image files</p>
-                  <span className="px-4 py-1.5 rounded-xl bg-white dark:bg-slate-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 border border-slate-300 dark:border-slate-700 shadow-xs mb-2">
-                    Browse File
-                  </span>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">PNG, JPG, or JPEG image files</p>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cameraInputRef.current?.click();
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Take Photo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 shadow-xs hover:border-emerald-500 transition cursor-pointer"
+                    >
+                      Browse Files
+                    </button>
+                  </div>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium flex items-center gap-1">
                     <Sparkles className="w-3 h-3 text-emerald-500" /> Stored locally in /uploads/
                   </span>

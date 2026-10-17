@@ -85,18 +85,60 @@ export default function RecommendationTableSection({
   const mediumRecs = evalResult?.medium_items || allRecs.filter(r => r.tier === 'MEDIUM');
   const badRecs = evalResult?.bad_items || allRecs.filter(r => r.tier === 'BAD');
 
+  const [activeQuickFilters, setActiveQuickFilters] = useState([]);
+
+  const toggleQuickFilter = (id) => {
+    setActiveQuickFilters((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const getDishNutrients = (rec) => {
+    if (rec.nutrients) return rec.nutrients;
+    const match = (dishes || []).find(
+      (d) => (typeof d === 'string' ? d : d.name || '').toLowerCase() === (rec.dish_name || '').toLowerCase()
+    );
+    if (match && typeof match === 'object') {
+      return match.nutrients || match;
+    }
+    return {};
+  };
+
   const filterList = (list) => {
-    if (!searchQuery.trim()) return list;
-    const q = searchQuery.toLowerCase().trim();
-    return list.filter((item) => {
-      const matchName = (item.dish_name || '').toLowerCase().includes(q);
-      const matchSummary = (item.summary_reason || '').toLowerCase().includes(q);
-      const matchFlags = [...(item.green_flags || []), ...(item.red_flags || [])].some((f) =>
-        f.toLowerCase().includes(q)
-      );
-      const matchTips = (item.customization_tips || '').toLowerCase().includes(q);
-      return matchName || matchSummary || matchFlags || matchTips;
-    });
+    let result = list;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter((item) => {
+        const matchName = (item.dish_name || '').toLowerCase().includes(q);
+        const matchSummary = (item.summary_reason || '').toLowerCase().includes(q);
+        const matchFlags = [...(item.green_flags || []), ...(item.red_flags || [])].some((f) =>
+          f.toLowerCase().includes(q)
+        );
+        const matchTips = (item.customization_tips || '').toLowerCase().includes(q);
+        return matchName || matchSummary || matchFlags || matchTips;
+      });
+    }
+
+    if (activeQuickFilters.length > 0) {
+      result = result.filter((item) => {
+        const nut = getDishNutrients(item);
+        const cals = Number(nut.calories) || 0;
+        const prot = Number(nut.protein) || 0;
+        const carbs = Number(nut.carbs) || 0;
+        const sod = Number(nut.sodium) || 0;
+
+        for (const f of activeQuickFilters) {
+          if (f === 'good_only' && item.tier !== 'GOOD') return false;
+          if (f === 'high_protein' && prot < 25 && !item.green_flags?.some((flag) => flag.toLowerCase().includes('protein'))) return false;
+          if (f === 'low_sodium' && (sod > 500 || item.red_flags?.some((flag) => flag.toLowerCase().includes('sodium')))) return false;
+          if (f === 'low_carb' && (carbs > 30 || item.red_flags?.some((flag) => flag.toLowerCase().includes('carb')))) return false;
+          if (f === 'under_500' && cals > 500) return false;
+        }
+        return true;
+      });
+    }
+
+    return result;
   };
 
   const filteredAll = filterList(
@@ -865,6 +907,45 @@ export default function RecommendationTableSection({
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Quick Macro & Dietary Filter Chips */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mr-1 flex items-center gap-1">
+              Quick Filters:
+            </span>
+            {[
+              { id: 'good_only', label: '🟢 Top Tier Only' },
+              { id: 'high_protein', label: '💪 High Protein (≥25g)' },
+              { id: 'low_sodium', label: '🌿 Low Sodium (≤500mg)' },
+              { id: 'low_carb', label: '🥑 Low Carb (≤30g)' },
+              { id: 'under_500', label: '🔥 Under 500 kcal' },
+            ].map((f) => {
+              const active = activeQuickFilters.includes(f.id);
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => toggleQuickFilter(f.id)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+                    active
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-400'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+            {activeQuickFilters.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveQuickFilters([])}
+                className="text-[11px] font-semibold text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 underline ml-1 cursor-pointer"
+              >
+                Clear all
+              </button>
+            )}
           </div>
 
           {/* VIEW MODE 1: STACKED 3-TIER VIEW (Tiered upon each other) */}

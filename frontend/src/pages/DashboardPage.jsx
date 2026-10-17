@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Zap,
   Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { useNutrition } from '../context/NutritionContext';
 import { useAuth } from '../context/AuthContext';
@@ -137,6 +138,41 @@ export default function DashboardPage() {
       total_carbs: stagedPlateNutrients.carbs,
       total_fats: stagedPlateNutrients.fats,
       total_sodium: stagedPlateNutrients.sodium,
+    };
+    handleSaveMealToLog(mealEntry);
+  };
+
+  const recentMealsToRelog = useMemo(() => {
+    if (!loggedMeals || loggedMeals.length === 0) return [];
+    const seen = new Set();
+    const list = [];
+    for (const m of loggedMeals) {
+      const itemsList = m.dishes || m.items || [];
+      const dishesKey = itemsList.map((d) => d.name).sort().join('|');
+      if (dishesKey && !seen.has(dishesKey)) {
+        seen.add(dishesKey);
+        list.push(m);
+      }
+      if (list.length >= 3) break;
+    }
+    return list;
+  }, [loggedMeals]);
+
+  const handleRelogMeal = (meal) => {
+    if (!handleSaveMealToLog) return;
+    const now = new Date();
+    const nut = meal.nutrients || {};
+    const mealEntry = {
+      ...meal,
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      date: todayLocal,
+      timestamp: now.toISOString(),
+      nutrients: nut,
+      total_calories: Number(meal.total_calories || nut.calories || 0),
+      total_protein: Number(meal.total_protein || nut.protein || 0),
+      total_carbs: Number(meal.total_carbs || nut.carbs || 0),
+      total_fats: Number(meal.total_fats || nut.fat || 0),
+      total_sodium: Number(meal.total_sodium || nut.sodium || 0),
     };
     handleSaveMealToLog(mealEntry);
   };
@@ -511,6 +547,62 @@ export default function DashboardPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Quick Re-Log Recents Card */}
+          {recentMealsToRelog.length > 0 && (
+            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-3 transition-colors mt-6">
+              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                    <RotateCcw className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Frequent & Recent Meals</h3>
+                    <span className="text-[11px] text-slate-400">1-click re-log for repeat breakfasts or favorites</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                {recentMealsToRelog.map((meal, idx) => {
+                  const nut = meal.nutrients || {};
+                  const mealItems = meal.dishes || meal.items || [];
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                          <span>{meal.name || 'Meal'}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold">
+                            {meal.meal_type || meal.mealSlot || 'Plate'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate max-w-sm">
+                          {mealItems.map((d) => d.name).join(', ')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2.5 font-medium">
+                          <span>🔥 {Math.round(meal.total_calories || nut.calories || 0)} kcal</span>
+                          <span>P: {Math.round(meal.total_protein || nut.protein || 0)}g</span>
+                          <span>Na: {Math.round(meal.total_sodium || nut.sodium || 0)}mg</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRelogMeal(meal)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Log for Today</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
