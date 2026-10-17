@@ -134,7 +134,15 @@ class AccountDelete(BaseModel):
 
 
 class CancelDeletionRequest(BaseModel):
+    email: EmailStr
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
 
 class EmailChangeRequest(BaseModel):
@@ -230,16 +238,16 @@ class MfaDisableRequest(BaseModel):
 # --- Profile Schemas ---
 
 class UserProfileUpdate(BaseModel):
-    age: Optional[int] = 35
-    gender: Optional[str] = "male"
-    height_cm: Optional[float] = 175.0
-    weight_kg: Optional[float] = 75.0
-    activity_level: Optional[str] = "moderate"
-    primary_goal: Optional[str] = "maintenance"
-    health_conditions: Optional[List[str]] = Field(default_factory=list)
-    allergies: Optional[List[str]] = Field(default_factory=list)
-    dietary_preferences: Optional[List[str]] = Field(default_factory=list)
-    raw_bio_text: Optional[str] = ""
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
+    activity_level: Optional[str] = None
+    primary_goal: Optional[str] = None
+    health_conditions: Optional[List[str]] = None
+    allergies: Optional[List[str]] = None
+    dietary_preferences: Optional[List[str]] = None
+    raw_bio_text: Optional[str] = None
     cached_matrix: Optional[Dict[str, Any]] = None
 
 

@@ -14,13 +14,14 @@ class AppSettings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     database_url: str = Field(default="sqlite:///nutrimenu.db")
+    redis_url: Optional[str] = None
     better_auth_secret: Optional[SecretStr] = None
     auth_secret: Optional[SecretStr] = None
     secret_key: Optional[SecretStr] = None
     encryption_secret_key: Optional[SecretStr] = None
 
     # Allowed Origins
-    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,https://codeclosed.github.io"
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://codeclosed.github.io"
     better_auth_trusted_origins: Optional[str] = None
     trusted_proxy_count: int = 0
 
@@ -35,7 +36,23 @@ class AppSettings(BaseSettings):
     smtp_user: Optional[str] = None
     smtp_password: Optional[SecretStr] = None
     smtp_from: Optional[str] = None
-    smtp_tls_mode: Literal["starttls", "ssl", "none"] = "starttls"
+    smtp_tls_mode: Optional[Literal["starttls", "ssl", "none"]] = None
+    # Legacy flags documented in .env.example (SMTP_USE_TLS / SMTP_USE_SSL)
+    smtp_use_tls: Optional[bool] = None
+    smtp_use_ssl: Optional[bool] = None
+
+    def is_smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password and self.smtp_password.get_secret_value().strip())
+
+    def resolved_smtp_tls_mode(self) -> str:
+        """Resolves TLS mode: explicit SMTP_TLS_MODE > SMTP_USE_SSL/SMTP_USE_TLS flags > port heuristic."""
+        if self.smtp_tls_mode:
+            return self.smtp_tls_mode
+        if self.smtp_use_ssl:
+            return "ssl"
+        if self.smtp_use_tls is False:
+            return "none"
+        return "ssl" if self.smtp_port == 465 else "starttls"
 
     # Frontend URL for link generation in emails
     frontend_url: str = "https://codeclosed.github.io/AI-Project"

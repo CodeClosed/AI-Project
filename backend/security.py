@@ -59,12 +59,8 @@ def resolve_auth_secret() -> str:
                 "CRITICAL SECURITY ERROR: BETTER_AUTH_SECRET (or AUTH_SECRET) is required in production! "
                 "Generate one using: openssl rand -base64 32"
             )
-        # Generate ephemeral cryptographically secure secret for dev
-        ephemeral = secrets.token_urlsafe(32)
-        logger.warning(
-            "BETTER_AUTH_SECRET was not set. Generated temporary ephemeral 256-bit secret for development session."
-        )
-        return ephemeral
+        from backend.settings import settings
+        return settings.get_auth_secret()
 
     secret = secret.strip()
 
@@ -305,13 +301,28 @@ def get_client_ip(request: Request) -> str:
 
 class SlidingWindowRateLimiter:
     """
-    Thread-safe in-memory sliding window rate limiter.
+    Sliding window rate limiter with optional Redis distributed backend
+    and thread-safe in-memory fallback.
     Limits requests to max_requests within window_seconds per key (e.g. IP + endpoint).
     """
 
-    def __init__(self):
+    def __init__(self, redis_url: Optional[str] = None):
         self._lock = Lock()
         self._hits: Dict[str, deque] = defaultdict(deque)
+        self.redis_client = None
+
+        from backend.settings import settings
+        url = redis_url or settings.redis_url
+        if url:
+            try:
+                import redis
+                client = redis.from_url(url, decode_responses=True)
+                client.ping()
+                self.redis_client = client
+                logger.info("SlidingWindowRateLimiter connected to Redis distributed backend.")
+            except Exception as e:
+                logger.warning("Redis connection failed (%s); using in-memory rate limiter.", e)
+                self.redis_client = None
 
     def is_allowed(self, key: str, max_requests: int, window_seconds: int) -> Tuple[bool, int]:
         """
@@ -320,6 +331,33 @@ class SlidingWindowRateLimiter:
         """
         now = time.time()
         window_start = now - window_seconds
+
+        if self.redis_client:
+            try:
+                rkey = f"nutrimenu:ratelimit:{key}"
+                pipe = self.redis_client.pipeline()
+                pipe.zremrangebyscore(rkey, "-inf", window_start)
+                pipe.zcard(rkey)
+                pipe.zrange(rkey, 0, 0, withscores=True)
+                pipe.expire(rkey, window_seconds + 5)
+                _, count, oldest_items, _ = pipe.execute()
+
+                if count >= max_requests:
+                    if oldest_items:
+                        oldest_time = float(oldest_items[0][1])
+                        retry_after = max(1, int(oldest_time + window_seconds - now) + 1)
+                    else:
+                        retry_after = window_seconds
+                    return False, retry_after
+
+                # Add current hit
+                pipe2 = self.redis_client.pipeline()
+                pipe2.zadd(rkey, {f"{now}:{secrets.token_hex(4)}": now})
+                pipe2.expire(rkey, window_seconds + 5)
+                pipe2.execute()
+                return True, 0
+            except Exception as e:
+                logger.warning("Redis rate limit query failed (%s); falling back to in-memory check.", e)
 
         with self._lock:
             timestamps = self._hits[key]
@@ -338,6 +376,13 @@ class SlidingWindowRateLimiter:
 
     def reset(self):
         """Clears all rate limit buckets (useful for test isolation)."""
+        if self.redis_client:
+            try:
+                keys = self.redis_client.keys("nutrimenu:ratelimit:*")
+                if keys:
+                    self.redis_client.delete(*keys)
+            except Exception:
+                pass
         with self._lock:
             self._hits.clear()
 
@@ -512,10 +557,27 @@ async def get_optional_current_user(
     try:
         payload = jwt.decode(effective_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
-        if user_id:
-            user = db.query(User).filter(User.id == int(user_id)).first()
-            if user and user.is_active:
-                return user
+        if not user_id:
+            return None
+
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        if not user or not user.is_active:
+            return None
+
+        # Validate token version against revocation
+        token_ver = payload.get("ver")
+        if token_ver is not None and token_ver != getattr(user, "token_version", 0):
+            return None
+
+        # Validate server session if sid is embedded
+        session_id = payload.get("sid")
+        if session_id:
+            from backend.db_models import AuthSession
+            session_rec = db.query(AuthSession).filter(AuthSession.id == session_id).first()
+            if not session_rec or session_rec.revoked_at is not None:
+                return None
+
+        return user
     except Exception:
         pass
     return None

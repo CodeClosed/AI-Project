@@ -59,7 +59,8 @@ export default function LoginPage() {
     setError(null);
     setIsCancellingDeletion(true);
     try {
-      await cancelDeletion(password);
+      const targetEmail = deletionPendingData?.email || email;
+      await cancelDeletion(targetEmail, password);
       setDeletionPendingData(null);
       navigate(from, { replace: true });
     } catch (err) {

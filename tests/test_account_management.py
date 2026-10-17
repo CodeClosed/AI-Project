@@ -117,13 +117,17 @@ def test_email_change_flow():
 
         # Call confirm
         from backend.auth.codes import issue_verification_code
-        # Fetch actual code
-        clean_code = None
-        for cand in range(100000, 1000000):
-            from backend.auth.codes import hash_code
-            if hash_code(str(cand)) == vcode.code_hash:
-                clean_code = str(cand)
-                break
+        import re
+        match = re.search(r"Verification code:\s*(\d{6})", confirm_msg.text_body)
+        if match:
+            clean_code = match.group(1)
+        else:
+            for cand in range(0, 1000000):
+                from backend.auth.codes import hash_code
+                code_str = f"{cand:06d}"
+                if hash_code(code_str) == vcode.code_hash:
+                    clean_code = code_str
+                    break
 
         assert clean_code is not None
 
@@ -221,15 +225,14 @@ def test_account_deletion_grace_period_and_cancellation():
         assert login_data["deletion_pending"] is True
         assert login_data["scheduled_deletion_date"] is not None
 
-        # Cancel deletion
-        cancel_token, _, _ = create_auth_session(db, user)
+        # Cancel deletion directly with email + password (no session token required)
         cancel_res = client.post(
             "/api/account/deletion/cancel",
-            headers={"Authorization": f"Bearer {cancel_token}"},
-            json={"password": "Password123!"},
+            json={"email": "delete_user@accountmgmt.com", "password": "Password123!"},
         )
         assert cancel_res.status_code == 200
         assert cancel_res.json()["deletion_pending"] is False
+        assert cancel_res.json()["access_token"] is not None
 
         db.refresh(user)
         assert user.deletion_requested_at is None

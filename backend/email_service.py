@@ -1,8 +1,10 @@
 import os
+import ssl
 import smtplib
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr, parseaddr, formatdate, make_msgid
 from typing import List, Optional, Dict, Any
 from backend.settings import settings
 
@@ -63,14 +65,19 @@ class SMTPEmailBackend(BaseEmailBackend):
         self.port = port
         self.user = user
         self.password = password
-        self.from_email = from_email or user or "noreply@nutrimenu.ai"
+        # SMTP_FROM may be a bare address ("a@b.com") or a full header ("Name <a@b.com>")
+        display_name, address = parseaddr(from_email or "")
+        self.from_address = address or user or "noreply@nutrimenu.ai"
+        self.from_header = formataddr((display_name or "NutriMenu AI", self.from_address))
         self.tls_mode = tls_mode
 
     def send(self, message: EmailMessage) -> bool:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = message.subject
-        msg["From"] = f"NutriMenu AI <{self.from_email}>"
+        msg["From"] = self.from_header
         msg["To"] = message.to
+        msg["Date"] = formatdate(localtime=False)
+        msg["Message-ID"] = make_msgid(domain=self.from_address.split("@")[-1] or None)
 
         part1 = MIMEText(message.text_body, "plain", "utf-8")
         part2 = MIMEText(message.html_body, "html", "utf-8")
@@ -79,40 +86,70 @@ class SMTPEmailBackend(BaseEmailBackend):
 
         try:
             if self.tls_mode == "ssl":
-                server = smtplib.SMTP_SSL(self.host, self.port, timeout=10)
+                server = smtplib.SMTP_SSL(self.host, self.port, timeout=15, context=ssl.create_default_context())
             else:
-                server = smtplib.SMTP(self.host, self.port, timeout=10)
+                server = smtplib.SMTP(self.host, self.port, timeout=15)
+                server.ehlo()
                 if self.tls_mode == "starttls":
-                    server.starttls()
+                    server.starttls(context=ssl.create_default_context())
+                    server.ehlo()
 
-            if self.user and self.password:
-                server.login(self.user, self.password)
-
-            server.sendmail(self.from_email, [message.to], msg.as_string())
-            server.quit()
+            try:
+                if self.user and self.password:
+                    server.login(self.user, self.password)
+                server.sendmail(self.from_address, [message.to], msg.as_string())
+            finally:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
             logger.info("Successfully sent transactional email to %s (Subject: %s)", message.to, message.subject)
             return True
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(
+                "SMTP authentication failed for user '%s' on %s:%s (%s). "
+                "For Gmail/Outlook you must use an App Password, not your normal password.",
+                self.user, self.host, self.port, e,
+            )
+        except (smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError, OSError) as e:
+            logger.error(
+                "SMTP connection to %s:%s failed using tls_mode=%s (%s). "
+                "Use port 587 with STARTTLS or port 465 with SSL (SMTP_TLS_MODE=ssl).",
+                self.host, self.port, self.tls_mode, e,
+            )
         except Exception as e:
             logger.error("Failed to send transactional email to %s: %s", message.to, e)
-            return False
+        return False
 
 
 # Singleton backend instance resolution
 dev_email_backend = ConsoleEmailBackend()
+_console_warning_emitted = False
 
 
 def get_email_backend() -> BaseEmailBackend:
-    if settings.smtp_host and settings.smtp_user and settings.smtp_password:
+    global _console_warning_emitted
+    if settings.is_smtp_configured():
         return SMTPEmailBackend(
             host=settings.smtp_host,
             port=settings.smtp_port,
             user=settings.smtp_user,
-            password=settings.smtp_password.get_secret_value(),
+            password=settings.smtp_password.get_secret_value().strip(),
             from_email=settings.smtp_from,
-            tls_mode=settings.smtp_tls_mode,
+            tls_mode=settings.resolved_smtp_tls_mode(),
+        )
+    if not _console_warning_emitted:
+        _console_warning_emitted = True
+        logger.warning(
+            "SMTP is NOT configured (SMTP_HOST / SMTP_USER / SMTP_PASSWORD missing). "
+            "Emails and OTP codes will NOT be delivered - they are only printed to the backend console."
         )
     return dev_email_backend
 
+
+def is_real_email_delivery() -> bool:
+    """True when emails are actually delivered over SMTP (not just printed to the console)."""
+    return settings.is_smtp_configured()
 
 def _build_html_template(title: str, greeting: str, lead_text: str, code: Optional[str] = None, sub_text: str = "") -> str:
     code_block = ""

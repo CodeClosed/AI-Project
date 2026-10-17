@@ -120,7 +120,13 @@ def test_refresh_token_reuse_detection_revokes_family():
         assert res.status_code == 200
         refresh_2 = res.json()["refresh_token"]
 
-        # Attack: Adversary attempts to use old refresh_1 again
+        # Simulate time passing beyond the 60-second grace window (e.g., 5 minutes later)
+        from datetime import timedelta
+        db.refresh(session_1)
+        session_1.revoked_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+
+        # Attack: Adversary attempts to use old refresh_1 after grace window
         reuse_res = client.post("/api/auth/refresh", json={"refresh_token": refresh_1})
         assert reuse_res.status_code == 401
         assert "reuse detected" in reuse_res.json()["detail"].lower()

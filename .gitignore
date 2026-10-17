@@ -1,7 +1,6 @@
 # Environment variables & secrets
 .env
 *.env
-.streamlit/secrets.toml
 
 # Python cache & build
 __pycache__/

@@ -1,7 +1,7 @@
 """
 Integration tests for the complete NutriMenu AI pipeline.
 Executes User Profile -> Nutritional Matrix -> Menu Recognition / Input -> Tiered Recommendation
-completely offline without launching Streamlit.
+completely offline.
 """
 
 import pytest

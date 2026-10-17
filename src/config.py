@@ -1,6 +1,6 @@
 """
 Centralized Configuration Module for NutriMenu AI.
-Handles environment variables, Streamlit secrets, Gemini 3.7 Flash model definitions, and system defaults.
+Handles environment variables, Gemini Flash model definitions, and system defaults.
 """
 
 import os
@@ -74,24 +74,13 @@ load_env_file()
 
 def get_gemini_api_key() -> Optional[str]:
     """
-    Safely retrieves the Gemini API key from environment or Streamlit secrets.
+    Safely retrieves the Gemini API key from environment variables.
     Never returns mock or empty keys.
     """
     for key_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AI_API_KEY"]:
         api_key = os.environ.get(key_name, "").strip()
         if api_key and not api_key.startswith("mock_") and len(api_key) >= 10:
             return api_key
-
-    try:
-        import streamlit as st
-        if hasattr(st, "secrets"):
-            for key_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AI_API_KEY"]:
-                if key_name in st.secrets:
-                    secret_key = str(st.secrets[key_name]).strip()
-                    if secret_key and not secret_key.startswith("mock_") and len(secret_key) >= 10:
-                        return secret_key
-    except Exception:
-        pass
 
     return None
 
@@ -102,17 +91,6 @@ def get_gemini_model_name() -> str:
         model = os.environ.get(model_var, "").strip()
         if model:
             return model
-
-    try:
-        import streamlit as st
-        if hasattr(st, "secrets"):
-            for model_var in ["GEMINI_MODEL", "GOOGLE_MODEL"]:
-                if model_var in st.secrets:
-                    secret_model = str(st.secrets[model_var]).strip()
-                    if secret_model:
-                        return secret_model
-    except Exception:
-        pass
 
     return DEFAULT_GEMINI_MODEL
 
@@ -129,17 +107,6 @@ def get_openrouter_api_key() -> Optional[str]:
         api_key = os.environ.get(key_name, "").strip()
         if api_key and not api_key.startswith("mock_") and len(api_key) >= 10:
             return api_key
-
-    try:
-        import streamlit as st
-        if hasattr(st, "secrets"):
-            for key_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY"]:
-                if key_name in st.secrets:
-                    secret_key = str(st.secrets[key_name]).strip()
-                    if secret_key and not secret_key.startswith("mock_") and len(secret_key) >= 10:
-                        return secret_key
-    except Exception:
-        pass
 
     return None
 

@@ -494,19 +494,21 @@ def test_user_account_deletion(client):
     }, headers=headers)
     assert bad_del.status_code == 400
 
-    # 3. Delete account with correct password -> should succeed 200
+    # 3. Schedule account deletion with correct password -> should succeed 200 with grace period notice
     good_del = client.request("DELETE", "/api/auth/account", json={
         "password": "DeleteMePassword123!"
     }, headers=headers)
     assert good_del.status_code == 200
     assert good_del.json()["success"] is True
+    assert "scheduled_deletion_date" in good_del.json()
 
-    # 4. Verify user can no longer log in
+    # 4. Verify login now shows deletion_pending
     login_after_del = client.post("/api/auth/login", json={
         "email": "delete_me@example.com",
         "password": "DeleteMePassword123!"
     })
-    assert login_after_del.status_code == 401
+    assert login_after_del.status_code == 200
+    assert login_after_del.json()["deletion_pending"] is True
 
 
 

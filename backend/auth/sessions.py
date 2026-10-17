@@ -133,12 +133,48 @@ def rotate_refresh_token(
 
     now = datetime.now(timezone.utc)
 
-    # 1. Reuse Detection: If session was already revoked, an adversary or stale client is reusing it
+    # 1. Reuse Detection: If session was already revoked, check for benign rotation race (60-second grace window)
     if session_rec.revoked_at is not None:
+        revoked_time = session_rec.revoked_at if session_rec.revoked_at.tzinfo else session_rec.revoked_at.replace(tzinfo=timezone.utc)
+        elapsed_seconds = (now - revoked_time).total_seconds()
+
+        # If it was rotated less than 60s ago and was rotated normally, this is a benign network retry or race condition!
+        if session_rec.revoked_reason == "rotated" and elapsed_seconds <= 60.0:
+            logger.info(
+                "Benign refresh retry detected within grace window (%.1fs) for user_id=%s, family_id=%s. Re-issuing tokens.",
+                elapsed_seconds,
+                session_rec.user_id,
+                session_rec.family_id,
+            )
+            # Find the active unrevoked session in the same family, or create a fresh one
+            active_sibling = (
+                db.query(AuthSession)
+                .filter(
+                    AuthSession.family_id == session_rec.family_id,
+                    AuthSession.revoked_at.is_(None),
+                )
+                .order_by(AuthSession.created_at.desc())
+                .first()
+            )
+            if active_sibling:
+                # Mark sibling rotated to advance chain safely
+                active_sibling.revoked_at = now
+                active_sibling.revoked_reason = "rotated_via_grace_retry"
+
+            new_access, new_refresh, _ = create_auth_session(
+                db=db,
+                user=user,
+                family_id=session_rec.family_id,
+                request=request,
+            )
+            return new_access, new_refresh, user, None
+
         logger.warning(
-            "CRITICAL SECURITY: Refresh token reuse detected for user_id=%s, family_id=%s. Revoking entire family chain.",
+            "CRITICAL SECURITY: Refresh token reuse detected for user_id=%s, family_id=%s (elapsed: %.1fs, reason=%s). Revoking entire family chain.",
             session_rec.user_id,
             session_rec.family_id,
+            elapsed_seconds,
+            session_rec.revoked_reason,
         )
         # Invalidate all sessions in this family
         family_sessions = db.query(AuthSession).filter(AuthSession.family_id == session_rec.family_id).all()

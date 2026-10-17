@@ -18,7 +18,6 @@
 graph TD
     subgraph UI ["🎨 Client Layer"]
         ReactUI["💻 React 18 + Vite + Tailwind CSS<br/>(http://localhost:5173)"]
-        StreamlitUI["📊 Streamlit Web UI<br/>(http://localhost:8501)"]
     end
 
     subgraph Backend ["⚡ Backend API Layer (FastAPI)"]
@@ -33,7 +32,6 @@ graph TD
     end
 
     ReactUI -->|REST API| API
-    StreamlitUI --> Engines
     API --> Engines
     M1 --> M3
     M2 --> M3
@@ -138,8 +136,6 @@ GEMINI_MODEL=gemini-3.7-flash
 ---
 
 ### 3. Launch the Application
-
-#### Option A: Full-Stack React + FastAPI (Recommended)
 Runs both the FastAPI backend and React frontend concurrently:
 ```bash
 python run_fullstack.py
@@ -147,40 +143,38 @@ python run_fullstack.py
 - **React Frontend**: [http://localhost:5173](http://localhost:5173)
 - **FastAPI Swagger Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-#### Option B: Streamlit Web Dashboard
-```bash
-python run_ui.py
-# or: streamlit run app.py
-```
-- **Streamlit UI**: [http://localhost:8501](http://localhost:8501)
-
 ---
 
 ## 🧪 Automated Test Suite
 
-All 96 unit and integration tests run 100% offline:
+All 113 unit and integration tests run 100% offline:
 
 ```bash
 python -m pytest -v
 ```
 
-### Test Coverage Highlights:
-| Test Module | Focus Area | Status |
+### Complete Test Coverage (113/113 Tests):
+| Test Module | Focus Area | Tests |
 | :--- | :--- | :---: |
-| `tests/test_security_and_auth.py` | CSRF protection, secure cookies, PBKDF2 hashing, rate limiting, IP tracking | ✅ PASSED (15/15) |
-| `tests/test_mfa_and_password_reset.py` | TOTP MFA verification, secret encryption, password recovery flows | ✅ PASSED (11/11) |
-| `tests/test_extraction_validator.py` | Validation rules, confidence scoring, OCR schema compliance | ✅ PASSED (12/12) |
-| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, candidate failover | ✅ PASSED (9/9) |
-| `tests/test_safety_and_rules.py` | Strict allergen exclusions (score = 0), diabetic glycemic penalties | ✅ PASSED (7/7) |
-| `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | ✅ PASSED (7/7) |
-| `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | ✅ PASSED (6/6) |
-| `tests/test_openrouter_extractor.py` | Vision extractor fallback pipeline | ✅ PASSED (6/6) |
-| `tests/test_nutrition_ai.py` | Dish evaluator, macro splits, markdown serialization | ✅ PASSED (5/5) |
-| `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | ✅ PASSED (5/5) |
-| `tests/test_plate_optimizer.py` | Multi-dish nutrient estimation, burn-down math, vegetarian safety | ✅ PASSED (4/4) |
-| `tests/test_config.py` | Config getters, API key detection, fallback candidates | ✅ PASSED (4/4) |
-| `tests/test_matrix_generator.py` | Metabolic energy equations, macro distribution, clinical vectors | ✅ PASSED (3/3) |
-| `tests/test_integration_pipeline.py` | End-to-end OCR $\to$ Matrix $\to$ 3-Tier Matchmaker | ✅ PASSED (2/2) |
+| `tests/test_security_and_auth.py` | CSRF protection, secure cookies, PBKDF2 hashing, rate limiting, IP tracking | 15 tests |
+| `tests/test_extraction_validator.py` | Validation rules, confidence scoring, OCR schema compliance | 12 tests |
+| `tests/test_mfa_and_password_reset.py` | TOTP MFA verification, secret encryption, password recovery flows | 11 tests |
+| `tests/test_gemini_client.py` | Typed error handling, timeouts, 429 rate limits, candidate failover | 9 tests |
+| `tests/test_safety_and_rules.py` | Strict allergen exclusions (score = 0), diabetic glycemic penalties | 7 tests |
+| `tests/test_recommendation_engine.py` | 3-Tier classification, fuzzy OCR handling, batch matchmaker | 7 tests |
+| `tests/test_noise_filter.py` | Multi-layer noise stripping, regex entropy, typo fixes | 6 tests |
+| `tests/test_openrouter_extractor.py` | Vision extractor fallback pipeline | 6 tests |
+| `tests/test_nutrition_ai.py` | Dish evaluator, macro splits, markdown serialization | 5 tests |
+| `tests/test_recognizer.py` | Layout analysis, bounding box geometry, image stream support | 5 tests |
+| `tests/test_auth_sessions.py` | Server-side sessions, rotating refresh tokens, reuse detection | 5 tests |
+| `tests/test_production_config.py` | Production security invariants, secret validation assertions | 5 tests |
+| `tests/test_plate_optimizer.py` | Multi-dish nutrient estimation, burn-down math, vegetarian safety | 4 tests |
+| `tests/test_config.py` | Config getters, API key detection, fallback candidates | 4 tests |
+| `tests/test_account_management.py` | Active session tracking, remote sign-out, GDPR data export | 4 tests |
+| `tests/test_email_verification.py` | Cryptographic verification codes, expiration, resend cooldowns | 3 tests |
+| `tests/test_matrix_generator.py` | Metabolic energy equations, macro distribution, clinical vectors | 3 tests |
+| `tests/test_integration_pipeline.py` | End-to-end OCR $\to$ Matrix $\to$ 3-Tier Matchmaker | 2 tests |
+| **Total Test Suite** | **Comprehensive Full-Stack Coverage** | **113 Tests** |
 
 ---
 
@@ -217,16 +211,30 @@ To guarantee clinical safety, recommendations follow a strict two-stage hierarch
 
 ## 📡 REST API Documentation
 
-The FastAPI backend exposes standard OpenAPI REST endpoints:
+The FastAPI backend exposes standard OpenAPI REST endpoints organized into key domains:
 
-- `POST /api/ocr/extract`: Multipart image file upload. Runs Gemini 3.7 Flash vision extraction and grid parsing. Returns all recognized dishes.
-- `POST /api/matrix/generate`: Accepts user biometrics and clinical conditions. Returns daily metabolic energy and clinical risk vector matrix.
-- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix using Gemini 3.7 Flash. Returns 3-tier classification and structured reports.
-- `POST /api/plate/evaluate`: Evaluates multi-dish plate, computing cumulative macronutrients and remaining daily budget.
-- `POST /api/plate/complete`: Scans remaining menu dishes to suggest 1–2 companion items matching health matrix and dietary exclusions.
-- `GET /api/health`: Service health status, Gemini availability, and active model.
+#### 🔐 Authentication & Session Security
+- `POST /api/auth/register`: User account creation with Argon2/PBKDF2 password hashing.
+- `POST /api/auth/login`: Issue short-lived access JWT + rotating SHA-256 refresh session.
+- `POST /api/auth/refresh`: Single-use refresh token rotation with family reuse defense.
+- `POST /api/auth/logout`: Revoke active session immediately.
+- `GET /api/auth/me`: Retrieve authenticated user identity and permission role.
+- `GET /api/auth/sessions`: List active devices, IP addresses, and session timestamps.
+- `DELETE /api/auth/sessions/{session_id}`: Remotely revoke a specific session.
+- `POST /api/auth/email/verify`: Verify email address with 6-digit cryptographic OTP.
+- `POST /api/auth/password/reset`: Request or complete password reset flow.
+- `POST /api/auth/mfa/setup` & `POST /api/auth/mfa/verify`: Configure and enable RFC 6238 TOTP 2FA.
 
-Interactive documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+#### 🥗 AI Nutrition & Menu Recognition
+- `POST /api/ocr/extract`: Multipart image file upload. Runs Gemini 3.7 Flash vision extraction and grid parsing.
+- `GET /api/jobs/{job_id}/events`: Server-Sent Events (SSE) streaming endpoint for live OCR progress.
+- `POST /api/matrix/generate`: Accepts user biometrics and conditions; synthesizes metabolic targets and clinical risk vector matrix.
+- `POST /api/recommend/evaluate`: Evaluates menu dishes against nutritional matrix; returns 3-tier classification and biochemical rationales.
+- `POST /api/plate/evaluate`: Multi-dish plate evaluator computing cumulative macro burn-down against targets.
+- `POST /api/plate/complete`: AI gap-filler proposing 1–2 companion dishes for missing protein/fiber.
+- `GET /api/health`: Service health check, database status, and active AI model.
+
+Interactive Swagger documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
 ---
 
@@ -305,7 +313,17 @@ AI-Project/
 │   ├── schemas.py                # Pydantic v2 validation contracts
 │   └── security.py               # PBKDF2 hashing, JWT, TOTP 2FA, rate limiting
 ├── docs/
-│   └── PRODUCTION_CHECKLIST.md   # Complete production runbook & deployment guide
+│   ├── PRODUCTION_CHECKLIST.md   # Complete production runbook & deployment guide
+│   ├── SECURITY_AUDIT.md         # OWASP ASVS audit, threat model, and residual risk assessment
+│   ├── ACCOUNT_SECURITY.md       # Bcrypt, JWT, TOTP MFA, and account lifecycle specifications
+│   ├── DATA_RECOVERY.md          # Backup procedures, RPO/RTO objectives, and restore tests
+│   ├── FEATURE_GAP_ANALYSIS.md   # Full feature verification matrix
+│   ├── SECURITY_REMEDIATION_LOG.md # Detailed remediation log of all fixed vulnerabilities
+│   ├── SECURITY_TEST_PLAN.md     # Multi-tenant IDOR test plan and execution commands
+│   ├── menu_recognition_module.md # Multimodal Vision OCR and layout analysis specification
+│   ├── nutrition_recommendation_module.md # Clinical nutritional scoring specification
+│   ├── tiered_recommendation_module.md # 3-Tier Good/Medium/Bad matchmaking specification
+│   └── user_matrix_module.md     # Mifflin-St Jeor metabolic matrix specification
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
@@ -339,9 +357,7 @@ AI-Project/
 │   ├── test_security_and_auth.py      # Auth, brute-force & CSRF security test suite
 │   ├── test_mfa_and_password_reset.py # MFA & password reset test suite
 │   └── ...
-├── app.py                        # Streamlit application
 ├── run_fullstack.py              # Full-stack launcher (FastAPI + React)
-├── run_ui.py                     # Streamlit launcher
 └── requirements.txt              # Python dependencies
 ```
 

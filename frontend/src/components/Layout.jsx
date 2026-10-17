@@ -54,6 +54,12 @@ export default function Layout() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleSignOut = async () => {
+    setIsUserMenuOpen(false);
+    await logout();
+    navigate('/login');
+  };
+
   const dietLabels = (profile.dietary_preferences || []).join(', ');
   const allergyLabels = (profile.allergies || []).join(', ');
 
@@ -243,10 +249,8 @@ export default function Layout() {
                   <div className="pt-1 mt-1 border-t border-slate-100 dark:border-slate-800 px-2">
                     {isAuthenticated ? (
                       <button
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          logout();
-                        }}
+                        type="button"
+                        onClick={handleSignOut}
                         className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                       >
                         <LogOut className="w-4 h-4" />

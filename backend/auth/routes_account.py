@@ -171,9 +171,14 @@ def confirm_email_change(
     old_email = user.email
     user.email = new_email
     user.email_verified_at = datetime.now(timezone.utc)
-    # Increment token_version to invalidate other active sessions
+    # Increment token_version and revoke all other sessions
     user.token_version = (user.token_version or 0) + 1
     db.commit()
+
+    revoke_all_user_sessions(db, user.id, except_session_id=current_session_id, reason="email_changed")
+
+    # Issue fresh tokens with updated email claim
+    access_token, refresh_token, _ = create_auth_session(db, user, request=request)
 
     record_audit_log(
         db=db,
@@ -183,7 +188,15 @@ def confirm_email_change(
         details={"old_email": old_email, "new_email": new_email},
     )
 
-    return {"success": True, "message": "Email address updated successfully.", "email": new_email}
+    from backend.api import user_to_out
+    return {
+        "success": True,
+        "message": "Email address updated successfully.",
+        "email": new_email,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": user_to_out(user),
+    }
 
 
 # =====================================================================
@@ -330,13 +343,14 @@ def schedule_account_deletion(
 def cancel_account_deletion(
     req: CancelDeletionRequest,
     request: Request,
-    current: tuple[User, str] = Depends(get_current_user_and_session),
     db: Session = Depends(get_db),
 ):
-    """Cancels a pending account deletion and restores active standing."""
-    user, _ = current
-    if not verify_password(req.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is incorrect.")
+    """Cancels a pending account deletion and restores active standing using email and password credentials."""
+    clean_email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == clean_email).first()
+
+    if not user or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or password.")
 
     user.deletion_requested_at = None
     db.commit()

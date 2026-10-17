@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import {
   API_BASE_URL,
+  getStoredUser,
   generateHealthMatrix,
   evaluateRecommendations,
   fetchUserProfile,
@@ -17,15 +18,15 @@ import {
 const NutritionContext = createContext(null);
 
 export const DEFAULT_PROFILE = {
-  age: 45,
+  age: 30,
   gender: 'male',
-  height_cm: 176,
-  weight_kg: 86,
-  activity_level: 'sedentary',
-  primary_goal: 'fat_loss',
-  health_conditions: ['hypertension', 'type_2_diabetes', 'gerd'],
-  allergies: ['peanuts'],
-  dietary_preferences: ['vegetarian'],
+  height_cm: 175,
+  weight_kg: 70,
+  activity_level: 'moderate',
+  primary_goal: 'maintenance',
+  health_conditions: [],
+  allergies: [],
+  dietary_preferences: [],
   raw_bio_text: '',
   custom_targets_override: {
     enabled: false,
@@ -33,7 +34,7 @@ export const DEFAULT_PROFILE = {
     target_protein_g: 130,
     target_carbs_g: 220,
     target_fats_g: 65,
-    sodium_ceiling_mg: 2000,
+    sodium_ceiling_mg: 2300,
     prescribed_by: '',
     clinical_notes: '',
   },
@@ -152,11 +153,13 @@ export function computeLocalMatrix(p) {
 }
 
 export function NutritionProvider({ children }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   const [profile, setProfile] = useState(() => {
     try {
-      const saved = localStorage.getItem('nutrimenu_account_profile');
+      const storedUser = getStoredUser();
+      const userKey = storedUser?.id ? `nutrimenu_user_${storedUser.id}_account_profile` : null;
+      const saved = (userKey && localStorage.getItem(userKey)) || localStorage.getItem('nutrimenu_account_profile');
       return saved ? JSON.parse(saved) : DEFAULT_PROFILE;
     } catch {
       return DEFAULT_PROFILE;
@@ -168,7 +171,9 @@ export function NutritionProvider({ children }) {
   // Active Plate & Multi-Dish State
   const [plate, setPlate] = useState(() => {
     try {
-      const saved = localStorage.getItem('nutrimenu_active_plate');
+      const storedUser = getStoredUser();
+      const userKey = storedUser?.id ? `nutrimenu_user_${storedUser.id}_active_plate` : null;
+      const saved = (userKey && localStorage.getItem(userKey)) || localStorage.getItem('nutrimenu_active_plate');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -178,7 +183,9 @@ export function NutritionProvider({ children }) {
   // Logged Daily Meals History
   const [loggedMeals, setLoggedMeals] = useState(() => {
     try {
-      const saved = localStorage.getItem('nutrimenu_daily_logged_meals');
+      const storedUser = getStoredUser();
+      const userKey = storedUser?.id ? `nutrimenu_user_${storedUser.id}_daily_logged_meals` : null;
+      const saved = (userKey && localStorage.getItem(userKey)) || localStorage.getItem('nutrimenu_daily_logged_meals');
       if (!saved) return [];
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return [];
@@ -222,7 +229,9 @@ export function NutritionProvider({ children }) {
   // Saved Menus History
   const [savedMenus, setSavedMenus] = useState(() => {
     try {
-      const saved = localStorage.getItem('nutrimenu_saved_menus');
+      const storedUser = getStoredUser();
+      const userKey = storedUser?.id ? `nutrimenu_user_${storedUser.id}_saved_menus` : null;
+      const saved = (userKey && localStorage.getItem(userKey)) || localStorage.getItem('nutrimenu_saved_menus');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -232,38 +241,67 @@ export function NutritionProvider({ children }) {
   const [evalResult, setEvalResult] = useState(null);
   const [evalLoading, setEvalLoading] = useState(false);
 
+  const isLoggingOutRef = useRef(false);
+  const profileDebounceRef = useRef(null);
+  const initialLoadDoneRef = useRef(false);
+
   const getStorageKey = useCallback((suffix) => {
     return user?.id ? `nutrimenu_user_${user.id}_${suffix}` : `nutrimenu_guest_${suffix}`;
   }, [user?.id]);
 
   useEffect(() => {
+    if (isLoggingOutRef.current) return;
     try {
-      localStorage.setItem(getStorageKey('saved_menus'), JSON.stringify(savedMenus));
+      const key = getStorageKey('saved_menus');
+      localStorage.setItem(key, JSON.stringify(savedMenus));
+      if (!user?.id) {
+        localStorage.setItem('nutrimenu_saved_menus', JSON.stringify(savedMenus));
+      }
     } catch {}
-  }, [savedMenus, getStorageKey]);
+  }, [savedMenus, getStorageKey, user?.id]);
 
   useEffect(() => {
+    if (isLoggingOutRef.current) return;
     try {
-      localStorage.setItem(getStorageKey('account_profile'), JSON.stringify(profile));
+      const key = getStorageKey('account_profile');
+      localStorage.setItem(key, JSON.stringify(profile));
+      if (!user?.id) {
+        localStorage.setItem('nutrimenu_account_profile', JSON.stringify(profile));
+      }
     } catch {}
     setUserMatrix(computeLocalMatrix(profile));
-  }, [profile, getStorageKey]);
+  }, [profile, getStorageKey, user?.id]);
 
   useEffect(() => {
+    if (isLoggingOutRef.current) return;
     try {
-      localStorage.setItem(getStorageKey('active_plate'), JSON.stringify(plate));
+      const key = getStorageKey('active_plate');
+      localStorage.setItem(key, JSON.stringify(plate));
+      if (!user?.id) {
+        localStorage.setItem('nutrimenu_active_plate', JSON.stringify(plate));
+      }
     } catch {}
-  }, [plate, getStorageKey]);
+  }, [plate, getStorageKey, user?.id]);
 
   useEffect(() => {
+    if (isLoggingOutRef.current) return;
     try {
-      localStorage.setItem(getStorageKey('daily_logged_meals'), JSON.stringify(loggedMeals));
+      const key = getStorageKey('daily_logged_meals');
+      localStorage.setItem(key, JSON.stringify(loggedMeals));
+      if (!user?.id) {
+        localStorage.setItem('nutrimenu_daily_logged_meals', JSON.stringify(loggedMeals));
+      }
     } catch {}
-  }, [loggedMeals, getStorageKey]);
+  }, [loggedMeals, getStorageKey, user?.id]);
 
-  // Clean in-memory user data immediately upon logout
+  // Clean in-memory user data immediately upon logout without wiping saved cache
   useEffect(() => {
     const handleLogout = () => {
+      isLoggingOutRef.current = true;
+      initialLoadDoneRef.current = false;
+      if (profileDebounceRef.current) {
+        clearTimeout(profileDebounceRef.current);
+      }
       setPlate([]);
       setLoggedMeals([]);
       setSavedMenus([]);
@@ -382,46 +420,102 @@ export function NutritionProvider({ children }) {
   // Synchronize user profile & logged meals from database when logged in
   useEffect(() => {
     async function loadCloudUserData() {
-      if (!isAuthenticated || !user) {
-        setPlate([]);
-        setLoggedMeals([]);
-        setSavedMenus([]);
-        setDishes([]);
-        setEvalResult(null);
-        setImagePreview(null);
-        setProfile(DEFAULT_PROFILE);
-        setUserMatrix(computeLocalMatrix(DEFAULT_PROFILE));
+      // Do nothing while auth is still verifying on app start or refresh
+      if (isLoading) {
         return;
       }
+
+      if (!isAuthenticated || !user?.id) {
+        return;
+      }
+
+      isLoggingOutRef.current = false;
+
+      // 1. Immediately rehydrate from locally cached user storage to eliminate delay
+      let localCachedProfile = null;
+      try {
+        const cachedProfileStr = localStorage.getItem(`nutrimenu_user_${user.id}_account_profile`);
+        if (cachedProfileStr) {
+          const parsed = JSON.parse(cachedProfileStr);
+          if (parsed && typeof parsed === 'object') {
+            localCachedProfile = parsed;
+            setProfile(parsed);
+            setUserMatrix(computeLocalMatrix(parsed));
+          }
+        }
+
+        const cachedPlateStr = localStorage.getItem(`nutrimenu_user_${user.id}_active_plate`);
+        if (cachedPlateStr) {
+          const parsed = JSON.parse(cachedPlateStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPlate(parsed);
+          }
+        } else {
+          // If user plate is empty, check if guest had items to migrate
+          const guestPlateStr = localStorage.getItem('nutrimenu_guest_active_plate') || localStorage.getItem('nutrimenu_active_plate');
+          if (guestPlateStr) {
+            const guestPlate = JSON.parse(guestPlateStr);
+            if (Array.isArray(guestPlate) && guestPlate.length > 0) {
+              setPlate(guestPlate);
+            }
+          }
+        }
+
+        const cachedMealsStr = localStorage.getItem(`nutrimenu_user_${user.id}_daily_logged_meals`);
+        if (cachedMealsStr) {
+          const parsed = JSON.parse(cachedMealsStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setLoggedMeals(parsed);
+          }
+        }
+
+        const cachedMenusStr = localStorage.getItem(`nutrimenu_user_${user.id}_saved_menus`);
+        if (cachedMenusStr) {
+          const parsed = JSON.parse(cachedMenusStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setSavedMenus(parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Error reading local user cache on login:', err);
+      }
+
+      // 2. Fetch authoritative cloud data from backend database
       try {
         const cloudProfile = await fetchUserProfile();
         if (cloudProfile) {
           const mappedProfile = {
-            age: cloudProfile.age ?? 35,
-            gender: cloudProfile.gender ?? 'male',
-            height_cm: cloudProfile.height_cm ?? 175,
-            weight_kg: cloudProfile.weight_kg ?? 75,
-            activity_level: cloudProfile.activity_level ?? 'moderate',
-            primary_goal: cloudProfile.primary_goal ?? 'maintenance',
-            health_conditions: cloudProfile.health_conditions || [],
-            allergies: cloudProfile.allergies || [],
-            dietary_preferences: cloudProfile.dietary_preferences || [],
-            raw_bio_text: cloudProfile.raw_bio_text || '',
-            custom_targets_override: cloudProfile.custom_targets_override || DEFAULT_PROFILE.custom_targets_override,
+            age: cloudProfile.age ?? localCachedProfile?.age ?? 35,
+            gender: cloudProfile.gender ?? localCachedProfile?.gender ?? 'male',
+            height_cm: cloudProfile.height_cm ?? localCachedProfile?.height_cm ?? 175,
+            weight_kg: cloudProfile.weight_kg ?? localCachedProfile?.weight_kg ?? 75,
+            activity_level: cloudProfile.activity_level ?? localCachedProfile?.activity_level ?? 'moderate',
+            primary_goal: cloudProfile.primary_goal ?? localCachedProfile?.primary_goal ?? 'maintenance',
+            health_conditions: cloudProfile.health_conditions || localCachedProfile?.health_conditions || [],
+            allergies: cloudProfile.allergies || localCachedProfile?.allergies || [],
+            dietary_preferences: cloudProfile.dietary_preferences || localCachedProfile?.dietary_preferences || [],
+            raw_bio_text: cloudProfile.raw_bio_text || localCachedProfile?.raw_bio_text || '',
+            custom_targets_override:
+              cloudProfile.cached_matrix?.custom_targets_override ||
+              cloudProfile.custom_targets_override ||
+              localCachedProfile?.custom_targets_override ||
+              DEFAULT_PROFILE.custom_targets_override,
           };
           setProfile(mappedProfile);
           if (cloudProfile.cached_matrix) {
             setUserMatrix(cloudProfile.cached_matrix);
           } else {
-            syncMatrix(mappedProfile);
+            setUserMatrix(computeLocalMatrix(mappedProfile));
           }
-        } else {
-          setProfile(DEFAULT_PROFILE);
-          setUserMatrix(computeLocalMatrix(DEFAULT_PROFILE));
+
+          // If active plate in local state is still empty, restore active_plate from cloud matrix backup
+          if (Array.isArray(cloudProfile.cached_matrix?.active_plate) && cloudProfile.cached_matrix.active_plate.length > 0) {
+            setPlate((prev) => (prev.length === 0 ? cloudProfile.cached_matrix.active_plate : prev));
+          }
         }
 
         const cloudMeals = await fetchUserMeals();
-        if (Array.isArray(cloudMeals)) {
+        if (Array.isArray(cloudMeals) && cloudMeals.length > 0) {
           const normalized = cloudMeals.map((m) => {
             const cals = Number(m.total_calories ?? m.nutrients?.calories ?? 0);
             const prot = Number(m.total_protein ?? m.nutrients?.protein ?? 0);
@@ -448,37 +542,102 @@ export function NutritionProvider({ children }) {
             };
           });
           setLoggedMeals(normalized);
-        } else {
-          setLoggedMeals([]);
         }
 
         const cloudMenus = await fetchSavedMenus();
-        if (Array.isArray(cloudMenus)) {
+        if (Array.isArray(cloudMenus) && cloudMenus.length > 0) {
           setSavedMenus(cloudMenus);
-        } else {
-          setSavedMenus([]);
         }
       } catch (err) {
         console.warn('Failed loading cloud data:', err);
+      } finally {
+        // Mark cloud data hydration as completed for this session
+        initialLoadDoneRef.current = true;
       }
     }
     loadCloudUserData();
-  }, [isAuthenticated, user?.id, syncMatrix]);
+  }, [isAuthenticated, isLoading, user?.id]);
 
-  const handleSaveProfile = async () => {
-    const updatedMatrix = await syncMatrix(profile);
+  // Auto-save biometric profile updates to database with 1.5s debounce
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id || isLoggingOutRef.current) return;
+
+    // Do NOT trigger autosave if cloud profile hasn't loaded yet!
+    if (!initialLoadDoneRef.current) {
+      return;
+    }
+
+    if (profileDebounceRef.current) {
+      clearTimeout(profileDebounceRef.current);
+    }
+
+    profileDebounceRef.current = setTimeout(async () => {
+      try {
+        const localMatrix = userMatrix || computeLocalMatrix(profile);
+        await updateUserProfile({
+          ...profile,
+          cached_matrix: {
+            ...localMatrix,
+            custom_targets_override: profile.custom_targets_override,
+            active_plate: plate,
+          },
+        });
+      } catch (err) {
+        // Silently catch background autosave
+      }
+    }, 1500);
+
+    return () => {
+      if (profileDebounceRef.current) {
+        clearTimeout(profileDebounceRef.current);
+      }
+    };
+  }, [profile, isAuthenticated, user?.id, plate]);
+
+  const handleSaveProfile = async (profileOverride = null) => {
+    const profileToSave = profileOverride || profile;
+    const baseMatrix = userMatrix || computeLocalMatrix(profileToSave);
+
+    // 1. Immediately save to backend database with current/base matrix so it never hangs
     if (isAuthenticated) {
       try {
         await updateUserProfile({
-          ...profile,
-          cached_matrix: updatedMatrix,
+          ...profileToSave,
+          cached_matrix: {
+            ...baseMatrix,
+            custom_targets_override: profileToSave.custom_targets_override,
+            active_plate: plate,
+          },
         });
       } catch (err) {
         console.error('Failed saving profile to database:', err);
       }
     }
-    if (updatedMatrix && dishes.length > 0) {
-      runEvaluation(updatedMatrix, dishes);
+
+    // 2. Request updated AI matrix in background/async
+    try {
+      const updatedMatrix = await syncMatrix(profileToSave);
+      if (isAuthenticated && updatedMatrix) {
+        try {
+          await updateUserProfile({
+            ...profileToSave,
+            cached_matrix: {
+              ...updatedMatrix,
+              custom_targets_override: profileToSave.custom_targets_override,
+              active_plate: plate,
+            },
+          });
+        } catch (err) {
+          console.warn('Failed saving updated matrix to database:', err);
+        }
+      }
+      if (updatedMatrix && dishes.length > 0) {
+        runEvaluation(updatedMatrix, dishes);
+      }
+      return updatedMatrix;
+    } catch (err) {
+      console.warn('Backend matrix generation fallback to local:', err);
+      return baseMatrix;
     }
   };
 
@@ -578,9 +737,13 @@ export function NutritionProvider({ children }) {
     const carbs = Number(mealEntry.total_carbs ?? mealEntry.nutrients?.carbs ?? 0);
     const fats = Number(mealEntry.total_fats ?? mealEntry.nutrients?.fat ?? mealEntry.nutrients?.fats ?? 0);
     const sod = Number(mealEntry.total_sodium ?? mealEntry.nutrients?.sodium ?? 0);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const mealId = mealEntry.id || `meal_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     const normalized = {
       ...mealEntry,
+      id: mealId,
+      date: mealEntry.date || todayStr,
       name: mealEntry.name || `${mealEntry.mealSlot || mealEntry.meal_type || 'Meal'} Plate`,
       meal_type: mealEntry.meal_type || mealEntry.mealSlot || 'Lunch',
       total_calories: cals,

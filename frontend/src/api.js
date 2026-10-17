@@ -3,6 +3,7 @@ let refreshPromise = null;
 
 const AUTH_TOKEN_KEY = 'nutrimenu_auth_token';
 const REFRESH_TOKEN_KEY = 'nutrimenu_refresh_token';
+const USER_KEY = 'nutrimenu_user';
 
 export function getApiBaseUrl() {
   if (typeof window !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
@@ -32,6 +33,31 @@ export function setCustomApiUrl(url) {
 }
 
 export const API_BASE_URL = getApiBaseUrl();
+
+export function getStoredUser() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(USER_KEY) : null;
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredUser(user) {
+  try {
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_KEY);
+    }
+  } catch {}
+}
+
+export function clearStoredUser() {
+  try {
+    localStorage.removeItem(USER_KEY);
+  } catch {}
+}
 
 export function getStoredToken() {
   return inMemoryAccessToken || (typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null);
@@ -70,6 +96,7 @@ export function clearStoredTokens() {
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   } catch {}
 }
 
@@ -87,7 +114,6 @@ export async function rotateTokens() {
 
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
-    clearStoredTokens();
     throw new Error('No refresh token available');
   }
 
@@ -101,15 +127,23 @@ export async function rotateTokens() {
       });
 
       if (!res.ok) {
-        clearStoredTokens();
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('auth:session_expired'));
+        // Only clear tokens and declare session dead on definitive auth rejections (401 / 403 / 422)
+        // NOT on temporary server outages (500, 502, 503), rate limits (429), or network dropouts!
+        if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 422) {
+          clearStoredTokens();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth:session_expired'));
+          }
+          throw new Error('Session expired');
         }
-        throw new Error('Session expired');
+        throw new Error(`Token refresh temporary failure (HTTP ${res.status})`);
       }
 
       const data = await res.json();
       setStoredTokens(data.access_token, data.refresh_token);
+      if (data.user) {
+        setStoredUser(data.user);
+      }
       return data;
     } finally {
       refreshPromise = null;
@@ -128,7 +162,18 @@ async function fetchWithAuth(endpoint, options = {}, isRetry = false) {
   const url = `${baseUrl}${endpoint}`;
   const headers = { ...options.headers };
 
-  const token = getStoredToken();
+  let token = getStoredToken();
+
+  // If access token is missing in memory/storage but a refresh token exists, attempt an initial rotation
+  if (!token && getRefreshToken() && !endpoint.startsWith('/api/auth/login') && !endpoint.startsWith('/api/auth/register') && endpoint !== '/api/auth/refresh') {
+    try {
+      const rotated = await rotateTokens();
+      if (rotated?.access_token) {
+        token = rotated.access_token;
+      }
+    } catch {}
+  }
+
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -144,7 +189,16 @@ async function fetchWithAuth(endpoint, options = {}, isRetry = false) {
       headers,
     });
 
-    if (response.status === 401 && !isRetry && getRefreshToken() && endpoint !== '/api/auth/refresh') {
+    // Endpoints that should NEVER trigger auto-refresh on 401
+    const isAuthRoute =
+      endpoint.startsWith('/api/auth/login') ||
+      endpoint.startsWith('/api/auth/register') ||
+      endpoint.startsWith('/api/auth/refresh') ||
+      endpoint.startsWith('/api/auth/verify-email') ||
+      endpoint.startsWith('/api/auth/reset-password') ||
+      endpoint.startsWith('/api/auth/mfa/verify');
+
+    if (response.status === 401 && !isRetry && getRefreshToken() && !isAuthRoute) {
       try {
         const rotated = await rotateTokens();
         if (rotated?.access_token) {
@@ -159,7 +213,7 @@ async function fetchWithAuth(endpoint, options = {}, isRetry = false) {
       }
     }
 
-    if (response.status === 401 && token) {
+    if (response.status === 401 && token && !isAuthRoute) {
       clearStoredTokens();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('auth:session_expired'));
@@ -195,6 +249,9 @@ export async function registerUser(email, password, profile = null) {
   if (data.access_token) {
     setStoredTokens(data.access_token, data.refresh_token);
   }
+  if (data.user) {
+    setStoredUser(data.user);
+  }
   return data;
 }
 
@@ -212,6 +269,9 @@ export async function loginUser(email, password) {
   if (data.access_token) {
     setStoredTokens(data.access_token, data.refresh_token);
   }
+  if (data.user) {
+    setStoredUser(data.user);
+  }
   return data;
 }
 
@@ -219,15 +279,30 @@ export async function fetchCurrentUser() {
   const token = getStoredToken();
   if (!token) return null;
 
-  const res = await fetchWithAuth('/api/auth/me', {
-    method: 'GET',
-  });
+  try {
+    const res = await fetchWithAuth('/api/auth/me', {
+      method: 'GET',
+    });
 
-  if (!res.ok) {
-    clearStoredToken();
-    return null;
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearStoredTokens();
+        clearStoredUser();
+        return null;
+      }
+      // On temporary server error or non-401, retain the cached user
+      return getStoredUser();
+    }
+    const data = await res.json();
+    if (data) {
+      setStoredUser(data);
+    }
+    return data;
+  } catch (err) {
+    console.warn('Unable to reach auth server to refresh profile:', err);
+    // On network failure, do not purge tokens; fallback to locally cached user
+    return getStoredUser();
   }
-  return await res.json();
 }
 
 export async function fetchUserProfile() {
@@ -270,6 +345,9 @@ export async function changeUserPassword(oldPassword, newPassword) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.detail || 'Failed to change password.');
+  }
+  if (data.access_token) {
+    setStoredTokens(data.access_token, data.refresh_token);
   }
   return data;
 }
@@ -322,6 +400,9 @@ export async function verifyMfaLogin(tempToken, code) {
   }
   if (data.access_token) {
     setStoredTokens(data.access_token, data.refresh_token);
+  }
+  if (data.user) {
+    setStoredUser(data.user);
   }
   return data;
 }
@@ -601,6 +682,9 @@ export async function verifyEmailAddress(email, code) {
   if (data.access_token) {
     setStoredTokens(data.access_token, data.refresh_token);
   }
+  if (data.user) {
+    setStoredUser(data.user);
+  }
   return data;
 }
 
@@ -667,6 +751,12 @@ export async function confirmEmailChange(code) {
   if (!res.ok) {
     throw new Error(data.detail || 'Failed to confirm email change.');
   }
+  if (data.access_token) {
+    setStoredTokens(data.access_token, data.refresh_token);
+  }
+  if (data.user) {
+    setStoredUser(data.user);
+  }
   return data;
 }
 
@@ -703,10 +793,10 @@ export async function scheduleAccountDeletion(password) {
   return data;
 }
 
-export async function cancelAccountDeletion(password) {
+export async function cancelAccountDeletion(email, password) {
   const res = await fetchWithAuth('/api/account/deletion/cancel', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ email, password }),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -715,14 +805,29 @@ export async function cancelAccountDeletion(password) {
   if (data.access_token) {
     setStoredTokens(data.access_token, data.refresh_token);
   }
+  if (data.user) {
+    setStoredUser(data.user);
+  }
   return data;
 }
 
 export async function logoutServerSession() {
+  const token = getStoredToken();
+  if (!token) return;
+
   try {
-    await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const baseUrl = getApiBaseUrl();
+    await fetch(`${baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    }).catch(() => {});
+    clearTimeout(timeoutId);
   } catch {}
-  clearStoredTokens();
 }
 
 

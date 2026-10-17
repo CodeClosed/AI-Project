@@ -107,10 +107,24 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        settings.assert_production_ready()
         init_db()
         logger.info("Database tables initialized successfully.")
     except Exception as e:
-        logger.error("Database initialization failed: %s", e)
+        logger.error("Database initialization or production validation failed: %s", e)
+        if settings.is_production:
+            raise
+
+    if settings.is_smtp_configured():
+        logger.info(
+            "Email delivery: SMTP via %s:%s (tls=%s)",
+            settings.smtp_host, settings.smtp_port, settings.resolved_smtp_tls_mode(),
+        )
+    else:
+        logger.warning(
+            "Email delivery: CONSOLE ONLY. SMTP_HOST/SMTP_USER/SMTP_PASSWORD are not set, so OTP and "
+            "verification emails are printed to this terminal and NOT sent. Run `python scripts/send_test_email.py you@example.com` after configuring SMTP."
+        )
     
     # Background maintenance worker for session cleanup and GDPR account purges
     maintenance_task = asyncio.create_task(background_maintenance_worker(interval_seconds=3600))
@@ -154,7 +168,7 @@ async def add_security_headers(request: Request, call_next):
 raw_trusted_origins = (
     os.getenv("BETTER_AUTH_TRUSTED_ORIGINS")
     or os.getenv("ALLOWED_ORIGINS")
-    or "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,https://codeclosed.github.io"
+    or "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://codeclosed.github.io"
 )
 trusted_origins = [origin.strip().rstrip("/") for origin in raw_trusted_origins.split(",") if origin.strip()]
 dev_localhost_pattern = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$")
@@ -586,6 +600,9 @@ def login_user(req: UserLogin, request: Request, db: Session = Depends(get_db)):
             two_factor_method=user.two_factor_method or "authenticator",
         )
 
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
     log_audit_event(
         event_type="auth.login_success",
         request=request,
@@ -719,6 +736,24 @@ def reset_password(req: ResetPasswordRequest, request: Request, db: Session = De
 
     if not is_valid_code:
         user.otp_attempts += 1
+        if user.otp_attempts >= 5:
+            user.otp_code = None
+            user.otp_expires_at = None
+            user.otp_purpose = None
+            db.commit()
+            log_audit_event(
+                event_type="auth.password_reset_lockout",
+                request=request,
+                user_id=user.id,
+                email=user.email,
+                status="blocked",
+                details={"reason": "max_otp_attempts_exceeded"}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed verification attempts. This code has been invalidated for security. Please request a new code.",
+            )
+
         db.commit()
         log_audit_event(
             event_type="auth.password_reset_failed_code",
@@ -826,6 +861,9 @@ def verify_mfa_login(req: MfaVerifyRequest, request: Request, db: Session = Depe
             detail="Invalid two-factor authentication code or backup recovery code.",
         )
 
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
     log_audit_event(
         event_type="auth.mfa_login_success",
         request=request,
@@ -914,6 +952,25 @@ def disable_mfa(
             detail="Incorrect password. Cannot disable 2FA.",
         )
 
+    # If code is supplied, verify it as extra confirmation
+    if req.code and req.code.strip():
+        clean_code = req.code.strip()
+        code_valid = False
+        if current_user.totp_secret:
+            plain_secret = decrypt_data(current_user.totp_secret)
+            if plain_secret and verify_totp_code(plain_secret, clean_code):
+                code_valid = True
+        if not code_valid and current_user.backup_codes:
+            for h in current_user.backup_codes:
+                if verify_password(clean_code.upper().strip(), h):
+                    code_valid = True
+                    break
+        if not code_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid two-factor authentication or backup code.",
+            )
+
     current_user.two_factor_enabled = False
     current_user.totp_secret = None
     current_user.backup_codes = []
@@ -986,7 +1043,7 @@ def delete_account(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Permanently deletes user account, profile, and history upon password confirmation."""
+    """Schedules user account deletion with 14-day grace period (standardized with /api/account)."""
     if not verify_password(req.password, current_user.hashed_password):
         log_audit_event(
             event_type="auth.account_delete_failed",
@@ -1001,21 +1058,33 @@ def delete_account(
             detail="Incorrect password. Account deletion aborted.",
         )
 
-    user_id = current_user.id
-    email = current_user.email
-
-    db.delete(current_user)
+    now = datetime.now(timezone.utc)
+    scheduled_date = now + timedelta(days=settings.deletion_grace_days)
+    current_user.deletion_requested_at = now
+    revoke_all_user_sessions(db, current_user.id, reason="account_deletion_scheduled")
     db.commit()
 
+    date_str = scheduled_date.strftime("%B %d, %Y")
+    try:
+        from backend.email_service import send_deletion_scheduled_alert
+        send_deletion_scheduled_alert(current_user.email, date_str)
+    except Exception:
+        pass
+
     log_audit_event(
-        event_type="auth.account_deleted",
+        event_type="auth.account_deletion_scheduled",
         request=request,
-        user_id=user_id,
-        email=email,
+        user_id=current_user.id,
+        email=current_user.email,
         status="success",
+        details={"scheduled_date": date_str},
     )
 
-    return {"success": True, "message": "Account permanently deleted."}
+    return {
+        "success": True,
+        "message": f"Account scheduled for permanent deletion on {date_str}. You have {settings.deletion_grace_days} days to cancel by signing in.",
+        "scheduled_deletion_date": date_str,
+    }
 
 
 

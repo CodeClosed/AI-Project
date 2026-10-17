@@ -20,6 +20,7 @@ import {
   Layers,
   X,
   ShieldAlert,
+  FileText,
 } from 'lucide-react';
 import { exportMealsToCsv, openClinicalDoctorReport } from '../utils/exportUtils';
 

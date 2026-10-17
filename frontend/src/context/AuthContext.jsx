@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import {
   getStoredToken,
   getRefreshToken,
+  getStoredUser,
+  setStoredUser,
+  clearStoredUser,
   setStoredTokens,
   clearStoredTokens,
   loginUser as apiLogin,
@@ -17,7 +20,7 @@ import {
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => getStoredUser());
   const [token, setToken] = useState(() => getStoredToken());
   const [isLoading, setIsLoading] = useState(true);
   const [sessionExpiredNotice, setSessionExpiredNotice] = useState(false);
@@ -30,6 +33,7 @@ export function AuthProvider({ children }) {
     if (!savedToken && !savedRefreshToken) {
       setUser(null);
       setToken(null);
+      clearStoredUser();
       setIsLoading(false);
       return null;
     }
@@ -38,17 +42,25 @@ export function AuthProvider({ children }) {
       const userData = await fetchCurrentUser();
       if (userData) {
         setUser(userData);
+        setStoredUser(userData);
         setToken(getStoredToken());
         return userData;
       } else {
-        setUser(null);
-        setToken(null);
+        const currentToken = getStoredToken();
+        if (!currentToken) {
+          setUser(null);
+          setToken(null);
+          clearStoredUser();
+        }
       }
     } catch (err) {
       console.warn('Authentication token verification failed:', err);
-      setUser(null);
-      setToken(null);
-      clearStoredTokens();
+      if (err?.message?.includes('401') || err?.message?.includes('Session expired')) {
+        setUser(null);
+        setToken(null);
+        clearStoredTokens();
+        clearStoredUser();
+      }
     } finally {
       setIsLoading(false);
     }
@@ -59,28 +71,38 @@ export function AuthProvider({ children }) {
     refreshUser();
   }, [refreshUser]);
 
-  // Sync logout across browser tabs
+  // Sync login/logout across browser tabs in real-time
   useEffect(() => {
     const handleStorageChange = (e) => {
-      if (e.key === 'nutrimenu_refresh_token' && !e.newValue) {
-        setUser(null);
-        setToken(null);
-        clearStoredTokens();
+      if (e.key === 'nutrimenu_refresh_token') {
+        if (!e.newValue) {
+          // Logged out in another tab
+          setUser(null);
+          setToken(null);
+          clearStoredTokens();
+          clearStoredUser();
+        } else {
+          // Logged in or rotated tokens in another tab
+          setToken(getStoredToken());
+          setUser(getStoredUser());
+          refreshUser();
+        }
       }
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [refreshUser]);
 
   const login = async (email, password) => {
     setIsLoading(true);
     try {
       const res = await apiLogin(email, password);
-      if (res.verification_required || res.mfa_required) {
+      if (res.verification_required || res.mfa_required || res.deletion_pending) {
         return res;
       }
       setToken(res.access_token);
       setUser(res.user);
+      if (res.user) setStoredUser(res.user);
       return res;
     } finally {
       setIsLoading(false);
@@ -93,6 +115,7 @@ export function AuthProvider({ children }) {
       const res = await verifyMfaLogin(tempToken, code);
       setToken(res.access_token);
       setUser(res.user);
+      if (res.user) setStoredUser(res.user);
       return res;
     } finally {
       setIsLoading(false);
@@ -111,6 +134,7 @@ export function AuthProvider({ children }) {
       }
       if (res.user) {
         setUser(res.user);
+        setStoredUser(res.user);
       }
       return res;
     } finally {
@@ -127,6 +151,7 @@ export function AuthProvider({ children }) {
       }
       if (res.user) {
         setUser(res.user);
+        setStoredUser(res.user);
       }
       return res;
     } finally {
@@ -138,15 +163,16 @@ export function AuthProvider({ children }) {
     return await resendEmailVerification(email);
   };
 
-  const cancelDeletion = async (password) => {
+  const cancelDeletion = async (email, password) => {
     setIsLoading(true);
     try {
-      const res = await cancelAccountDeletion(password);
+      const res = await cancelAccountDeletion(email, password);
       if (res.access_token) {
         setToken(res.access_token);
       }
       if (res.user) {
         setUser(res.user);
+        setStoredUser(res.user);
       }
       return res;
     } finally {
@@ -155,11 +181,9 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    try {
-      await logoutServerSession();
-    } catch {}
-
+    // 1. Instantly clear tokens and user from local storage and in-memory state
     clearStoredTokens();
+    clearStoredUser();
     setToken(null);
     setUser(null);
 
@@ -169,15 +193,21 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('nutrimenu_active_plate');
       localStorage.removeItem('nutrimenu_daily_logged_meals');
       localStorage.removeItem('nutrimenu_saved_menus');
-      // Purge any user-scoped storage keys
+      // Purge any user-scoped and guest-scoped storage keys
       Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('nutrimenu_user_') || key.startsWith('nutrimenu_guest_')) {
+        if (key.startsWith('nutrimenu_guest_') || key.startsWith('nutrimenu_user_')) {
           localStorage.removeItem(key);
         }
       });
     } catch {}
 
+    // 2. Notify entire app to purge memory state
     window.dispatchEvent(new CustomEvent('auth:logout'));
+
+    // 3. Notify backend server session revocation in background
+    try {
+      await logoutServerSession();
+    } catch {}
   };
 
   useEffect(() => {
