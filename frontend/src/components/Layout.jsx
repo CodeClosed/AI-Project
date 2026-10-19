@@ -20,7 +20,6 @@ import {
   Settings,
   Scale,
   Download,
-  Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -37,8 +36,6 @@ export default function Layout() {
     plate,
     dishes,
     loggedMeals,
-    aiMode,
-    setAiMode,
   } = useNutrition();
 
   const navigate = useNavigate();
@@ -137,35 +134,6 @@ export default function Layout() {
 
           {/* Right Action Bar */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* AI Speed Mode Toggle (Fast Groq vs Main Gemini) */}
-            <div className="hidden sm:inline-flex p-0.5 bg-slate-100 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 shadow-2xs items-center">
-              <button
-                type="button"
-                onClick={() => setAiMode('fast')}
-                title="Fast Mode: Ultra-fast <1s inference via Groq LPU (Llama 3.3)"
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
-                  aiMode === 'fast'
-                    ? 'bg-amber-500 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Zap className={`w-3 h-3 ${aiMode === 'fast' ? 'fill-white text-white' : 'text-amber-500 fill-amber-500'}`} />
-                <span>Fast (Groq)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAiMode('main')}
-                title="Main Mode: Deep multimodal reasoning via Google Gemini 3"
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
-                  aiMode === 'main'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Sparkles className={`w-3 h-3 ${aiMode === 'main' ? 'text-white' : 'text-emerald-500'}`} />
-                <span>Main (Gemini)</span>
-              </button>
-            </div>
 
             {/* Dark / Light Mode Switch */}
             <button

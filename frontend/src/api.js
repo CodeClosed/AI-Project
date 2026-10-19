@@ -611,7 +611,7 @@ export async function deleteSavedMenu(menuId) {
 // ⚡ ASYNC JOBS & REAL-TIME PROGRESS
 // =====================================================================
 
-export async function startMenuScanJob(imageFile, profile = null, apiKey = null, mode = 'fast') {
+export async function startMenuScanJob(imageFile, profile = null, apiKey = null, mode = null) {
   const formData = new FormData();
   formData.append('file', imageFile);
   if (apiKey) {
