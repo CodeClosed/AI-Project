@@ -3,9 +3,13 @@ import tempfile
 import pytest
 
 # Point DATABASE_URL to an isolated temporary SQLite database before application modules load
+os.environ["ENVIRONMENT"] = "test"
 _temp_db_fd, temp_db_path = tempfile.mkstemp(prefix="test_nutrimenu_", suffix=".db")
 os.close(_temp_db_fd)
 os.environ["DATABASE_URL"] = f"sqlite:///{temp_db_path}"
+
+from backend.settings import settings
+settings.environment = "test"
 
 @pytest.fixture(scope="session", autouse=True)
 def isolated_test_database():

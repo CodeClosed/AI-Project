@@ -129,6 +129,8 @@ _console_warning_emitted = False
 
 def get_email_backend() -> BaseEmailBackend:
     global _console_warning_emitted
+    if settings.environment == "test":
+        return dev_email_backend
     if settings.is_smtp_configured():
         return SMTPEmailBackend(
             host=settings.smtp_host,
@@ -149,7 +151,7 @@ def get_email_backend() -> BaseEmailBackend:
 
 def is_real_email_delivery() -> bool:
     """True when emails are actually delivered over SMTP (not just printed to the console)."""
-    return settings.is_smtp_configured()
+    return settings.environment != "test" and settings.is_smtp_configured()
 
 def _build_html_template(title: str, greeting: str, lead_text: str, code: Optional[str] = None, sub_text: str = "") -> str:
     code_block = ""
