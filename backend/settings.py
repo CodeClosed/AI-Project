@@ -41,6 +41,13 @@ class AppSettings(BaseSettings):
     smtp_use_tls: Optional[bool] = None
     smtp_use_ssl: Optional[bool] = None
 
+    @field_validator("smtp_use_tls", "smtp_use_ssl", mode="before")
+    @classmethod
+    def _sanitize_empty_bool(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     def is_smtp_configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_user and self.smtp_password and self.smtp_password.get_secret_value().strip())
 
