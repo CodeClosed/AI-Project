@@ -611,7 +611,7 @@ export async function deleteSavedMenu(menuId) {
 // ⚡ ASYNC JOBS & REAL-TIME PROGRESS
 // =====================================================================
 
-export async function startMenuScanJob(imageFile, profile = null, apiKey = null) {
+export async function startMenuScanJob(imageFile, profile = null, apiKey = null, mode = 'fast') {
   const formData = new FormData();
   formData.append('file', imageFile);
   if (apiKey) {
@@ -619,6 +619,10 @@ export async function startMenuScanJob(imageFile, profile = null, apiKey = null)
   }
   if (profile) {
     formData.append('profile', JSON.stringify(profile));
+  }
+  if (mode) {
+    formData.append('mode', mode);
+    formData.append('ai_provider', mode === 'fast' ? 'groq' : 'gemini');
   }
 
   const response = await fetchWithAuth('/api/jobs/menu-scan', {

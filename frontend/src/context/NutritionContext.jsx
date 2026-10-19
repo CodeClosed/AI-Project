@@ -168,6 +168,26 @@ export function NutritionProvider({ children }) {
 
   const [userMatrix, setUserMatrix] = useState(() => computeLocalMatrix(profile));
   const [loadingMatrix, setLoadingMatrix] = useState(false);
+
+  // AI Mode Selection: 'fast' (Groq LPU) vs 'main' (Google Gemini)
+  const [aiMode, setAiModeState] = useState(() => {
+    try {
+      return localStorage.getItem('nutrimenu_ai_mode') || 'fast';
+    } catch {
+      return 'fast';
+    }
+  });
+
+  const setAiMode = (newMode) => {
+    setAiModeState(newMode);
+    try {
+      localStorage.setItem('nutrimenu_ai_mode', newMode);
+    } catch {}
+  };
+
+  const toggleAiMode = () => {
+    setAiMode(aiMode === 'fast' ? 'main' : 'fast');
+  };
   // Active Plate & Multi-Dish State
   const [plate, setPlate] = useState(() => {
     try {
@@ -389,6 +409,8 @@ export function NutritionProvider({ children }) {
         dishes: payloadDishes,
         items: payloadDishes,
         profile: profile,
+        mode: aiMode,
+        ai_provider: aiMode === 'fast' ? 'groq' : 'gemini',
       });
 
       const rawRes = data?.result || data?.recommendations || data || {};
@@ -840,6 +862,9 @@ export function NutritionProvider({ children }) {
     setEvalResult,
     evalLoading,
     runEvaluation,
+    aiMode,
+    setAiMode,
+    toggleAiMode,
   };
 
   return <NutritionContext.Provider value={value}>{children}</NutritionContext.Provider>;

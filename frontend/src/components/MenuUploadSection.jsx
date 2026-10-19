@@ -13,6 +13,7 @@ import {
   FileText,
   RotateCcw,
   Camera,
+  Zap,
 } from 'lucide-react';
 import { uploadMenuImage, startMenuScanJob, pollMenuScanJob, API_BASE_URL } from '../api';
 import { useNutrition } from '../context/NutritionContext';
@@ -62,6 +63,8 @@ export default function MenuUploadSection({
     handleDeleteSavedMenu,
     handleSaveCurrentMenu,
     setEvalResult,
+    aiMode,
+    setAiMode,
   } = useNutrition();
 
   const [dragActive, setDragActive] = useState(false);
@@ -120,7 +123,7 @@ export default function MenuUploadSection({
       // 1. Try non-blocking background job first
       let data = null;
       try {
-        const jobInit = await startMenuScanJob(file, profile, profile?.api_key);
+        const jobInit = await startMenuScanJob(file, profile, profile?.api_key, aiMode);
         data = await pollMenuScanJob(jobInit.job_id, (jobUpdate) => {
           setActiveJob(jobUpdate);
         });
@@ -246,8 +249,39 @@ export default function MenuUploadSection({
           </p>
         </div>
 
-        {/* Input Switcher (Segmented Control) */}
-        <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* AI Engine Mode Toggle (Fast Groq vs Main Gemini) */}
+          <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs items-center">
+            <button
+              type="button"
+              onClick={() => setAiMode('fast')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
+                aiMode === 'fast'
+                  ? 'bg-amber-500 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+              title="Fast Mode uses Groq LPUs with Llama 3.3 for near-instant (<1s) recommendations & vision"
+            >
+              <Zap className={`w-3.5 h-3.5 ${aiMode === 'fast' ? 'fill-white text-white' : 'text-amber-500 fill-amber-500'}`} />
+              <span>Fast (Groq)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiMode('main')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
+                aiMode === 'main'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+              title="Main Mode uses Google Gemini 3 for deep multimodal reasoning and vision"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${aiMode === 'main' ? 'text-white' : 'text-emerald-500'}`} />
+              <span>Main (Gemini)</span>
+            </button>
+          </div>
+
+          {/* Input Switcher (Segmented Control) */}
+          <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
           <button
             onClick={() => setActiveTab('upload')}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.96] cursor-pointer ${
@@ -286,6 +320,7 @@ export default function MenuUploadSection({
           </button>
         </div>
       </div>
+    </div>
 
       {activeTab === 'upload' && (
         /* Side-by-Side 50/50 Grid */

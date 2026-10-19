@@ -1457,11 +1457,12 @@ def run_menu_analysis_task(
     api_key: Optional[str],
     user_id: Optional[int],
     profile_data: Optional[Dict[str, Any]],
+    ai_provider: Optional[str] = None,
 ):
     """Executes OCR extraction, matrix calculation, and 3-tier scoring asynchronously with progress updates."""
     try:
         job_manager.update_progress(job_id, 25, "Running Vision OCR & extracting menu dishes...", stage_id="ocr")
-        pipeline = MenuRecognitionPipeline(api_key=api_key)
+        pipeline = MenuRecognitionPipeline(api_key=api_key, ai_provider=ai_provider)
         recognized_menu = pipeline.process_image(dest_path)
 
         flat_items = recognized_menu.to_flat_items()
@@ -1538,7 +1539,8 @@ def run_menu_analysis_task(
 
         rec_result_dict = {}
         if candidate_dishes:
-            recommender = TieredFoodRecommender(user_matrix=matrix, api_key=api_key)
+            recommender_model = "llama-3.3-70b-versatile" if ai_provider == "groq" else "gemini-3-flash-preview" if ai_provider == "gemini" else None
+            recommender = TieredFoodRecommender(user_matrix=matrix, api_key=api_key, model_name=recommender_model)
             rec_result = recommender.recommend_menu(candidate_dishes)
             rec_result_dict = rec_result.to_dict()
 
@@ -1588,6 +1590,8 @@ async def start_menu_scan_job(
     file: UploadFile = File(...),
     api_key: Optional[str] = Form(None),
     profile: Optional[str] = Form(None),
+    mode: Optional[str] = Form(None),
+    ai_provider: Optional[str] = Form(None),
     optional_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """Enqueues an asynchronous menu OCR and recommendation evaluation job."""
@@ -1599,6 +1603,7 @@ async def start_menu_scan_job(
         raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
 
     effective_api_key = resolve_effective_api_key(api_key, optional_user)
+    resolved_provider = (ai_provider or ("groq" if mode == "fast" else "gemini" if mode == "main" else None))
 
     clean_original = re.sub(r'[^a-zA-Z0-9_.-]', '_', file.filename or "menu.jpg")
     unique_filename = f"{uuid.uuid4().hex[:12]}_{clean_original}"
@@ -1629,6 +1634,7 @@ async def start_menu_scan_job(
         api_key=effective_api_key,
         user_id=user_id,
         profile_data=parsed_profile,
+        ai_provider=resolved_provider,
     )
 
     return {
@@ -1904,7 +1910,10 @@ async def evaluate_recommendations(
         }
         return {"success": True, "result": empty_payload, "recommendations": empty_payload}
 
-    recommender = TieredFoodRecommender(user_matrix=matrix, api_key=api_key)
+    mode = req.get("mode")
+    ai_provider = req.get("ai_provider") or ("groq" if mode == "fast" else "gemini" if mode == "main" else None)
+    recommender_model = "llama-3.3-70b-versatile" if ai_provider == "groq" else "gemini-3-flash-preview" if ai_provider == "gemini" else None
+    recommender = TieredFoodRecommender(user_matrix=matrix, api_key=api_key, model_name=recommender_model)
     rec_result: TieredRecommendationResult = recommender.recommend_menu(dishes)
     result_dict = rec_result.to_dict()
 

@@ -294,7 +294,9 @@ class MenuRecognitionPipeline:
         api_key: Optional[str] = None,
         prefer_ai: bool = True,
         prefer_gemini: Optional[bool] = None,
+        ai_provider: Optional[str] = None,
     ):
+        self.ai_provider = ai_provider
         self.prefer_gemini = prefer_ai if prefer_gemini is None else prefer_gemini
         effective_gemini_key = api_key or get_gemini_api_key() or os.getenv("GEMINI_API_KEY")
 
@@ -317,7 +319,7 @@ class MenuRecognitionPipeline:
             elif isinstance(image_input, np.ndarray):
                 orig_img = image_input
 
-        active_provider = get_active_ai_provider()
+        active_provider = (self.ai_provider or get_active_ai_provider()).lower()
 
         if self.prefer_gemini:
             # 1. If explicit provider is Groq, run Groq Vision first
