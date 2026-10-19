@@ -22,6 +22,18 @@ FALLBACK_GEMINI_MODELS = [
     "gemini-3.6-flash",
 ]
 
+# --- Groq Defaults ---
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview"
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+FALLBACK_GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama-3.2-11b-vision-preview",
+    "mixtral-8x7b-32768",
+]
+
 # --- OpenRouter Defaults ---
 DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -124,10 +136,46 @@ def is_openrouter_available() -> bool:
     return bool(key and len(key.strip()) >= 10)
 
 
+def get_groq_api_key() -> Optional[str]:
+    """Retrieves Groq API key if configured."""
+    for key_name in ["GROQ_API_KEY"]:
+        api_key = os.environ.get(key_name, "").strip()
+        if api_key and not api_key.startswith("mock_") and len(api_key) >= 10:
+            return api_key
+    return None
+
+
+def get_groq_model_name() -> str:
+    """Retrieves configured Groq model name."""
+    model = os.environ.get("GROQ_MODEL", "").strip()
+    if model:
+        return model
+    return DEFAULT_GROQ_MODEL
+
+
+def is_groq_available() -> bool:
+    """Returns True if a valid Groq API key is configured."""
+    key = get_groq_api_key()
+    return bool(key and len(key.strip()) >= 10)
+
+
 def get_active_ai_provider() -> str:
-    """Determines active AI provider: Gemini -> OpenRouter -> Local."""
+    """
+    Determines active AI provider based on explicit configuration or availability:
+    Explicit AI_PROVIDER > Gemini > Groq > OpenRouter > Local.
+    """
+    explicit = os.environ.get("AI_PROVIDER", "").strip().lower()
+    if explicit == "groq" and is_groq_available():
+        return "groq"
+    if explicit == "gemini" and is_gemini_available():
+        return "gemini"
+    if explicit == "openrouter" and is_openrouter_available():
+        return "openrouter"
+
     if is_gemini_available():
         return "gemini"
+    if is_groq_available():
+        return "groq"
     if is_openrouter_available():
         return "openrouter"
     return "local"

@@ -11,13 +11,14 @@ import cv2
 import re
 from dotenv import load_dotenv
 
-from .config import get_gemini_api_key, DEFAULT_MIN_OCR_CONFIDENCE
+from .config import get_gemini_api_key, DEFAULT_MIN_OCR_CONFIDENCE, get_active_ai_provider, is_groq_available
 from .models import RecognizedMenu, MenuItem, MenuSection, BoundingBox, TextBlock
 from .preprocessing import Preprocessor
 from .noise_filter import AdvancedNoiseFilter
 from .layout_analyzer import LayoutAnalyzer
 from .menu_parser import MenuParser
 from .visualizer import MenuVisualizer
+from .groq_extractor import GroqMenuExtractor
 
 # Ensure environment variables (.env) are explicitly loaded
 load_dotenv(override=True)
@@ -298,6 +299,7 @@ class MenuRecognitionPipeline:
         effective_gemini_key = api_key or get_gemini_api_key() or os.getenv("GEMINI_API_KEY")
 
         self.gemini_extractor = GeminiMenuExtractor(api_key=effective_gemini_key)
+        self.groq_extractor = GroqMenuExtractor()
         self.local_extractor = FastLocalOCRExtractor(min_confidence=min_ocr_confidence)
         self.visualizer = MenuVisualizer()
 
@@ -315,17 +317,47 @@ class MenuRecognitionPipeline:
             elif isinstance(image_input, np.ndarray):
                 orig_img = image_input
 
-        if self.prefer_gemini and self.gemini_extractor.is_available():
-            try:
-                rec_menu = self.gemini_extractor.extract(image_input)
-                if visualize_path and orig_img is not None and orig_img.size > 0:
-                    try:
-                        self.visualizer.save_visualization(orig_img, rec_menu, output_path=visualize_path)
-                    except Exception as e:
-                        logger.warning("Visualizer error: %s", e)
-                return rec_menu
-            except Exception as e:
-                logger.warning("[MenuRecognitionPipeline] Gemini Vision API failed (%s), running local OCR.", e)
+        active_provider = get_active_ai_provider()
+
+        if self.prefer_gemini:
+            # 1. If explicit provider is Groq, run Groq Vision first
+            if active_provider == "groq" and self.groq_extractor.is_available():
+                try:
+                    rec_menu = self.groq_extractor.extract(image_input)
+                    if visualize_path and orig_img is not None and orig_img.size > 0:
+                        try:
+                            self.visualizer.save_visualization(orig_img, rec_menu, output_path=visualize_path)
+                        except Exception as e:
+                            logger.warning("Visualizer error: %s", e)
+                    return rec_menu
+                except Exception as e:
+                    logger.warning("[MenuRecognitionPipeline] Groq Vision failed (%s), attempting Gemini fallback.", e)
+
+            # 2. Gemini Vision
+            if self.gemini_extractor.is_available():
+                try:
+                    rec_menu = self.gemini_extractor.extract(image_input)
+                    if visualize_path and orig_img is not None and orig_img.size > 0:
+                        try:
+                            self.visualizer.save_visualization(orig_img, rec_menu, output_path=visualize_path)
+                        except Exception as e:
+                            logger.warning("Visualizer error: %s", e)
+                    return rec_menu
+                except Exception as e:
+                    logger.warning("[MenuRecognitionPipeline] Gemini Vision API failed (%s), attempting Groq fallback.", e)
+
+            # 3. Groq Vision Fallback
+            if active_provider != "groq" and self.groq_extractor.is_available():
+                try:
+                    rec_menu = self.groq_extractor.extract(image_input)
+                    if visualize_path and orig_img is not None and orig_img.size > 0:
+                        try:
+                            self.visualizer.save_visualization(orig_img, rec_menu, output_path=visualize_path)
+                        except Exception as e:
+                            logger.warning("Visualizer error: %s", e)
+                    return rec_menu
+                except Exception as e:
+                    logger.warning("[MenuRecognitionPipeline] Groq fallback failed (%s), running local OCR.", e)
 
         rec_menu = self.local_extractor.extract(image_input)
         if visualize_path and orig_img is not None and orig_img.size > 0:

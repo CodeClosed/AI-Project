@@ -15,11 +15,16 @@ from .config import (
     get_gemini_api_key,
     get_gemini_model_name,
     is_gemini_available,
+    get_groq_api_key,
+    get_groq_model_name,
+    is_groq_available,
     get_openrouter_api_key,
     get_openrouter_model_name,
+    get_active_ai_provider,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_TEMPERATURE,
     FALLBACK_GEMINI_MODELS,
+    FALLBACK_GROQ_MODELS,
     FALLBACK_OPENROUTER_MODELS,
 )
 from .gemini_client import (
@@ -30,6 +35,15 @@ from .gemini_client import (
     GeminiModelNotFoundError,
     GeminiTimeoutError,
     GeminiResponseParsingError,
+)
+from .groq_client import (
+    GroqClient,
+    GroqAPIError,
+    GroqAuthError,
+    GroqRateLimitError,
+    GroqModelNotFoundError,
+    GroqTimeoutError,
+    GroqResponseParsingError,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,15 +90,39 @@ class AIClient:
             session=self.session,
         )
 
+        # Groq client attributes
+        groq_key = api_key or get_groq_api_key()
+        groq_model = model_name or get_groq_model_name()
+        self.groq_client = GroqClient(
+            api_key=groq_key,
+            model_name=groq_model,
+            timeout=timeout,
+            temperature=temperature,
+            session=self.session,
+        )
+
         # OpenRouter client attributes
         self.openrouter_key = api_key or get_openrouter_api_key()
         self.openrouter_model = model_name or get_openrouter_model_name()
         self.base_url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
-        self.model_name = gemini_model if self.gemini_client.is_available() else self.openrouter_model
+
+        active_provider = get_active_ai_provider()
+        if active_provider == "groq":
+            self.model_name = groq_model
+        elif active_provider == "gemini":
+            self.model_name = gemini_model
+        elif active_provider == "openrouter":
+            self.model_name = self.openrouter_model
+        else:
+            self.model_name = gemini_model
 
     def is_available(self) -> bool:
-        """Returns True if Gemini or OpenRouter is configured with a valid key."""
-        return self.gemini_client.is_available() or bool(self.openrouter_key and len(self.openrouter_key.strip()) >= 10 and not self.openrouter_key.startswith("mock_"))
+        """Returns True if Gemini, Groq, or OpenRouter is configured with a valid key."""
+        return (
+            self.gemini_client.is_available()
+            or self.groq_client.is_available()
+            or bool(self.openrouter_key and len(self.openrouter_key.strip()) >= 10 and not self.openrouter_key.startswith("mock_"))
+        )
 
     def generate_json(
         self,
@@ -96,10 +134,33 @@ class AIClient:
         system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Sends request to Gemini 3.7 Flash first, falling back to OpenRouter if configured.
+        Executes structured JSON generation with provider preference:
+        Respects active provider setting (Groq vs Gemini) with automatic resilient fallback.
         """
-        # 1. Prefer Gemini 3.7 Flash if Gemini is available or if model is gemini-*
-        if self.gemini_client.is_available() or (self.raw_model and "gemini" in self.raw_model.lower()):
+        active_provider = get_active_ai_provider()
+        raw_model_lower = (self.raw_model or "").lower()
+
+        # Priority 1: Groq if explicitly chosen, if model indicates groq/llama/mixtral, or active provider is groq
+        prefer_groq = (
+            active_provider == "groq"
+            or any(kw in raw_model_lower for kw in ["groq", "llama", "mixtral"])
+        )
+
+        if prefer_groq and self.groq_client.is_available():
+            try:
+                return self.groq_client.generate_json(
+                    prompt=prompt,
+                    image_b64=image_b64,
+                    image_mime_type=image_mime_type,
+                    temperature=temperature,
+                    timeout=timeout,
+                    system_instruction=system_instruction,
+                )
+            except Exception as e:
+                logger.warning("[AIClient] Groq execution failed (%s), attempting Gemini / OpenRouter fallback.", e)
+
+        # Priority 2: Gemini
+        if self.gemini_client.is_available() or ("gemini" in raw_model_lower):
             try:
                 return self.gemini_client.generate_json(
                     prompt=prompt,
@@ -110,12 +171,23 @@ class AIClient:
                     system_instruction=system_instruction,
                 )
             except Exception as e:
-                # If OpenRouter is available, fallback; otherwise raise
-                if not (self.openrouter_key and len(self.openrouter_key.strip()) >= 10):
-                    raise
-                logger.warning("Gemini generation failed (%s), attempting OpenRouter fallback.", e)
+                logger.warning("[AIClient] Gemini execution failed (%s), attempting Groq / OpenRouter fallback.", e)
 
-        # 2. OpenRouter fallback
+        # Priority 3: Groq (if not already tried as Priority 1)
+        if not prefer_groq and self.groq_client.is_available():
+            try:
+                return self.groq_client.generate_json(
+                    prompt=prompt,
+                    image_b64=image_b64,
+                    image_mime_type=image_mime_type,
+                    temperature=temperature,
+                    timeout=timeout,
+                    system_instruction=system_instruction,
+                )
+            except Exception as e:
+                logger.warning("[AIClient] Groq fallback failed (%s), attempting OpenRouter.", e)
+
+        # Priority 4: OpenRouter fallback
         if self.openrouter_key and len(self.openrouter_key.strip()) >= 10:
             return self._generate_openrouter_json(
                 prompt=prompt,
@@ -126,7 +198,7 @@ class AIClient:
                 system_instruction=system_instruction,
             )
 
-        raise AIAuthError("No valid Gemini or AI provider API key configured.")
+        raise AIAuthError("No valid Gemini, Groq, or OpenRouter API key configured.")
 
     def _generate_openrouter_json(
         self,
